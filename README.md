@@ -10,6 +10,7 @@ For MPI contributor handoff tasks and execution order, see `NEXT_STEPS.md`.
 
 - Trains a simple MLP in serial (CPU) with SGD.
 - Loads MNIST directly from raw IDX files (no PyTorch/TensorFlow dependency).
+- Uses BLAS-backed linear algebra for core dense operations.
 - Writes per-epoch metrics to CSV.
 - Provides scripts for:
   - MNIST download/prep
@@ -57,6 +58,7 @@ nn_training/
 
 - `CMakeLists.txt`
   - Defines the C++17 build.
+  - Discovers and links BLAS (`find_package(BLAS REQUIRED)`).
   - Builds `nn_core` library and `serial_train` executable.
 - `.gitignore`
   - Ignores build artifacts and generated results/data outputs.
@@ -87,9 +89,11 @@ nn_training/
   - Builds `TrainConfig`, calls `run_serial_training(...)`, handles errors.
 - `src/tensor.cpp`
   - Implements matrix storage and numeric primitives.
+  - Uses BLAS `sgemm_` / `saxpy_` calls for core matrix multiply and row-bias accumulation.
   - Includes ReLU and row-wise softmax utilities needed by forward/backward passes.
 - `src/mlp.cpp`
   - Implements MLP initialization, forward pass, loss/accuracy metrics, backprop, and SGD updates.
+  - Uses BLAS-backed update kernels (`sgemv_`, `saxpy_`) for gradient reductions and parameter updates.
 - `src/data_mnist.cpp`
   - Implements binary IDX parsing for MNIST image/label files.
   - Validates MNIST magic numbers and normalizes pixel values to `[0, 1]`.
@@ -147,11 +151,13 @@ nn_training/
 
 ## Typical usage
 
-Compiler note: on this system, `/usr/bin/c++` points to GCC 7, while C++17 support is cleaner with newer GCC. We enforce this with `NN_FORCE_MODERN_GCC=ON` in CMake and default scripts to `NN_CXX_COMPILER=/usr/bin/g++`. Override if needed:
+Compiler note: on this system, `/usr/bin/c++` points to GCC 7, while C++17 support is cleaner with newer GCC. We enforce this with `NN_FORCE_MODERN_GCC=ON` in CMake and default build script compiler `NN_CXX_COMPILER=/usr/bin/g++`. Override if needed:
 
 ```bash
-NN_CXX_COMPILER=/path/to/g++ bash scripts/run_serial_smoke.sh
+NN_CXX_COMPILER=/path/to/g++ bash scripts/build.sh --clean
 ```
+
+BLAS note: scripts pin BLAS/OpenMP threads to 1 (`OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`) so serial and future MPI comparisons remain fair and reproducible.
 
 Prepare dataset + run smoke:
 

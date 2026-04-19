@@ -14,6 +14,10 @@ SMOKE_LEARNING_RATE="${SMOKE_LEARNING_RATE:-0.03}"
 SMOKE_SEED="${SMOKE_SEED:-42}"
 SMOKE_HIDDEN="${SMOKE_HIDDEN:-128,64}"
 
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
 mkdir -p "${ROOT_DIR}/results"
 
 bash "${ROOT_DIR}/scripts/prepare_mnist.sh"

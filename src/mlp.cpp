@@ -9,6 +9,22 @@ namespace nn {
 
 namespace {
 
+extern "C" {
+void sgemv_(
+    const char* trans,
+    const int* m,
+    const int* n,
+    const float* alpha,
+    const float* a,
+    const int* lda,
+    const float* x,
+    const int* incx,
+    const float* beta,
+    float* y,
+    const int* incy);
+void saxpy_(const int* n, const float* alpha, const float* x, const int* incx, float* y, const int* incy);
+}
+
 BatchMetrics compute_metrics(const Matrix& probs, const std::vector<int>& y) {
     if (probs.rows != static_cast<int>(y.size())) {
         throw std::invalid_argument("compute_metrics dimension mismatch");
@@ -107,11 +123,27 @@ BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float 
         const Matrix grad_w = matmul(a_prev_t, grad);
         std::vector<float> grad_b(
             static_cast<size_t>(layers_[static_cast<size_t>(layer_idx)].bias.size()), 0.0f);
-        for (int r = 0; r < grad.rows; ++r) {
-            for (int c = 0; c < grad.cols; ++c) {
-                grad_b[static_cast<size_t>(c)] += grad.at(r, c);
-            }
-        }
+        std::vector<float> ones(static_cast<size_t>(grad.rows), 1.0f);
+        const char trans_n = 'N';
+        const int m = grad.cols;
+        const int n = grad.rows;
+        const int lda = grad.cols;
+        const int inc_reduce = 1;
+        const float alpha_reduce = 1.0f;
+        const float beta_reduce = 0.0f;
+        // grad is row-major [rows, cols], interpreted as col-major [cols, rows] = grad^T.
+        sgemv_(
+            &trans_n,
+            &m,
+            &n,
+            &alpha_reduce,
+            grad.data.data(),
+            &lda,
+            ones.data(),
+            &inc_reduce,
+            &beta_reduce,
+            grad_b.data(),
+            &inc_reduce);
 
         Matrix grad_prev;
         if (layer_idx > 0) {
@@ -122,14 +154,25 @@ BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float 
         }
 
         Layer& layer = layers_[static_cast<size_t>(layer_idx)];
-        for (int i = 0; i < layer.weights.rows; ++i) {
-            for (int j = 0; j < layer.weights.cols; ++j) {
-                layer.weights.at(i, j) -= learning_rate * grad_w.at(i, j);
-            }
-        }
-        for (size_t j = 0; j < layer.bias.size(); ++j) {
-            layer.bias[j] -= learning_rate * grad_b[j];
-        }
+        const int inc_update = 1;
+        const int weight_size = static_cast<int>(layer.weights.data.size());
+        const float alpha_update = -learning_rate;
+        saxpy_(
+            &weight_size,
+            &alpha_update,
+            grad_w.data.data(),
+            &inc_update,
+            layer.weights.data.data(),
+            &inc_update);
+
+        const int bias_size = static_cast<int>(layer.bias.size());
+        saxpy_(
+            &bias_size,
+            &alpha_update,
+            grad_b.data(),
+            &inc_update,
+            layer.bias.data(),
+            &inc_update);
 
         if (layer_idx > 0) {
             grad = std::move(grad_prev);

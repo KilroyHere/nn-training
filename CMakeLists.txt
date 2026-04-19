@@ -16,6 +16,7 @@ if(NN_FORCE_MODERN_GCC AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 message(STATUS "Using C++ compiler: ${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION})")
+find_package(BLAS REQUIRED)
 
 add_library(nn_core
     src/tensor.cpp
@@ -26,6 +27,7 @@ add_library(nn_core
 )
 
 target_include_directories(nn_core PUBLIC include)
+target_link_libraries(nn_core PUBLIC ${BLAS_LIBRARIES})
 
 add_executable(serial_train src/main.cpp)
 target_link_libraries(serial_train PRIVATE nn_core)

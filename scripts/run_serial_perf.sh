@@ -16,6 +16,10 @@ SEED="${SEED:-42}"
 HIDDEN="${HIDDEN:-128,64}"
 DATA_DIR="${DATA_DIR:-${ROOT_DIR}/data/mnist}"
 
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
 mkdir -p "${RESULT_DIR}"
 
 bash "${ROOT_DIR}/scripts/prepare_mnist.sh"

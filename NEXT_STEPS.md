@@ -111,6 +111,7 @@ Add a convenience script (for example `scripts/run_serial_vs_mpi_compare.sh`) th
 From project root:
 
 ```bash
+bash scripts/build.sh
 bash scripts/run_serial_smoke.sh
 bash scripts/run_serial_perf.sh
 python3 scripts/compare_metrics.py results/smoke_metrics.csv results/smoke_metrics.csv

@@ -7,6 +7,28 @@
 
 namespace nn {
 
+namespace {
+
+extern "C" {
+void sgemm_(
+    const char* transa,
+    const char* transb,
+    const int* m,
+    const int* n,
+    const int* k,
+    const float* alpha,
+    const float* a,
+    const int* lda,
+    const float* b,
+    const int* ldb,
+    const float* beta,
+    float* c,
+    const int* ldc);
+void saxpy_(const int* n, const float* alpha, const float* x, const int* incx, float* y, const int* incy);
+}
+
+}  // namespace
+
 Matrix::Matrix(int r, int c, float value) : rows(r), cols(c), data(r * c, value) {}
 
 float& Matrix::at(int r, int c) {
@@ -33,14 +55,30 @@ Matrix matmul(const Matrix& a, const Matrix& b) {
         throw std::invalid_argument("matmul dimension mismatch");
     }
     Matrix out(a.rows, b.cols, 0.0f);
-    for (int i = 0; i < a.rows; ++i) {
-        for (int k = 0; k < a.cols; ++k) {
-            const float a_ik = a.at(i, k);
-            for (int j = 0; j < b.cols; ++j) {
-                out.at(i, j) += a_ik * b.at(k, j);
-            }
-        }
-    }
+    const char trans_n = 'N';
+    const int m = b.cols;
+    const int n = a.rows;
+    const int k = a.cols;
+    const int lda = b.cols;
+    const int ldb = a.cols;
+    const int ldc = out.cols;
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    // Row-major C = A * B mapped to column-major C^T = B^T * A^T.
+    sgemm_(
+        &trans_n,
+        &trans_n,
+        &m,
+        &n,
+        &k,
+        &alpha,
+        b.data.data(),
+        &lda,
+        a.data.data(),
+        &ldb,
+        &beta,
+        out.data.data(),
+        &ldc);
     return out;
 }
 
@@ -58,10 +96,17 @@ void add_row_vector(Matrix* a, const std::vector<float>& b) {
     if (a == nullptr || a->cols != static_cast<int>(b.size())) {
         throw std::invalid_argument("add_row_vector dimension mismatch");
     }
+    const int n = a->cols;
+    const int inc = 1;
+    const float alpha = 1.0f;
     for (int i = 0; i < a->rows; ++i) {
-        for (int j = 0; j < a->cols; ++j) {
-            a->at(i, j) += b[static_cast<size_t>(j)];
-        }
+        saxpy_(
+            &n,
+            &alpha,
+            b.data(),
+            &inc,
+            &a->data[static_cast<size_t>(i) * static_cast<size_t>(a->cols)],
+            &inc);
     }
 }
 
