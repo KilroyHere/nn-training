@@ -1,0 +1,9 @@
+build/
+results/*.csv
+results/*.log
+results/*.txt
+data/
+
+# Extra safety for dataset artifacts.
+*.ubyte
+*.ubyte.gz

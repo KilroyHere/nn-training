@@ -1,0 +1,207 @@
+# nn_training
+
+Serial-first C++ neural-network training project using real MNIST IDX files.
+
+This repository is currently focused on the first milestone: a buildable serial training pipeline with reproducible smoke tests and scripts, which will later become the correctness baseline for MPI model parallelism.
+
+For MPI contributor handoff tasks and execution order, see `NEXT_STEPS.md`.
+
+## What this project currently does
+
+- Trains a simple MLP in serial (CPU) with SGD.
+- Loads MNIST directly from raw IDX files (no PyTorch/TensorFlow dependency).
+- Writes per-epoch metrics to CSV.
+- Provides scripts for:
+  - MNIST download/prep
+  - local smoke runs
+  - cluster batch launch for serial runs
+
+## Repository structure
+
+```text
+nn_training/
+├── CMakeLists.txt
+├── .gitignore
+├── README.md
+├── include/
+│   ├── config.h
+│   ├── tensor.h
+│   ├── mlp.h
+│   ├── data_mnist.h
+│   ├── train_common.h
+│   └── train_serial.h
+├── src/
+│   ├── main.cpp
+│   ├── tensor.cpp
+│   ├── mlp.cpp
+│   ├── data_mnist.cpp
+│   ├── train_common.cpp
+│   └── train_serial.cpp
+├── scripts/
+│   ├── prepare_mnist.sh
+│   ├── build.sh
+│   ├── run_serial_smoke.sh
+│   ├── run_serial_perf.sh
+│   ├── compare_metrics.py
+│   └── job-serial.slurm
+├── docs/
+│   └── serial_mpi_parity.md
+├── data/
+│   └── mnist/        # created/populated by prepare_mnist.sh
+└── results/          # generated CSV/log outputs
+```
+
+## File-by-file explanation
+
+### Build and repo config
+
+- `CMakeLists.txt`
+  - Defines the C++17 build.
+  - Builds `nn_core` library and `serial_train` executable.
+- `.gitignore`
+  - Ignores build artifacts and generated results/data outputs.
+
+### Public headers (`include/`)
+
+- `include/config.h`
+  - Central runtime configuration (`TrainConfig`).
+  - Holds model sizes, training hyperparameters, MNIST file paths, and metrics output path.
+- `include/tensor.h`
+  - Lightweight matrix container (`Matrix`) and CPU math helpers.
+  - Declares ops used by MLP implementation (`matmul`, `transpose`, `relu`, `softmax`).
+- `include/mlp.h`
+  - Declares MLP class and batch metric struct.
+  - Exposes `train_batch(...)` and `evaluate_batch(...)`.
+- `include/data_mnist.h`
+  - Declares dataset structure and MNIST data-loading/subset APIs.
+- `include/train_common.h`
+  - Shared training utilities (config/dataset prep, metadata helpers, parity-safe helpers).
+- `include/train_serial.h`
+  - Declares serial training entrypoint used by `main.cpp`.
+
+### Source implementation (`src/`)
+
+- `src/main.cpp`
+  - CLI front-end for serial training.
+  - Parses options like `--epochs`, `--batch`, `--hidden`, `--data-dir`, `--output`.
+  - Builds `TrainConfig`, calls `run_serial_training(...)`, handles errors.
+- `src/tensor.cpp`
+  - Implements matrix storage and numeric primitives.
+  - Includes ReLU and row-wise softmax utilities needed by forward/backward passes.
+- `src/mlp.cpp`
+  - Implements MLP initialization, forward pass, loss/accuracy metrics, backprop, and SGD updates.
+- `src/data_mnist.cpp`
+  - Implements binary IDX parsing for MNIST image/label files.
+  - Validates MNIST magic numbers and normalizes pixel values to `[0, 1]`.
+  - Supports extracting selected subsets.
+- `src/train_serial.cpp`
+  - Serial backend implementation and runner:
+    - owns per-epoch training/evaluation loop
+    - uses shared setup/output helpers
+    - writes serial metrics output
+- `src/train_common.cpp`
+  - Backend-neutral setup and parity helpers:
+    - validates train config
+    - builds reproducible train/val subsets
+    - provides shared metadata formatting and output-dir utility
+
+### Scripts (`scripts/`)
+
+- `scripts/prepare_mnist.sh`
+  - Downloads MNIST `.gz` files from the official mirror and extracts IDX files into `data/mnist/`.
+  - Safe to rerun; skips files that already exist.
+- `scripts/build.sh`
+  - Shared build entrypoint:
+    1. configures CMake only when needed
+    2. builds with `make`
+  - Supports `--clean` for a clean reconfigure/rebuild.
+- `scripts/run_serial_smoke.sh`
+  - One-command local smoke run (run-only):
+    1. prepare MNIST
+    2. run a short serial training job
+    3. output metrics to `results/smoke_metrics.csv`
+- `scripts/run_serial_perf.sh`
+  - One-command serial performance run (run-only):
+    1. prepare MNIST
+    2. run a larger training configuration
+    3. write metrics CSV and print timing/throughput summary
+- `scripts/compare_metrics.py`
+  - Compares two metrics CSVs with tolerance checks (useful for future serial-vs-MPI correctness gates).
+- `scripts/job-serial.slurm`
+  - Slurm batch script for serial run on cluster resources.
+  - Run-only job launcher via `srun` (expects prebuilt binary).
+
+### Docs (`docs/`)
+
+- `docs/serial_mpi_parity.md`
+  - Defines parity contract rules for future serial vs MPI comparisons.
+
+### Runtime/generated directories
+
+- `data/`
+  - Dataset storage root (currently `data/mnist/`).
+- `results/`
+  - Metrics and run artifacts generated by scripts/training.
+- `build/` (generated)
+  - CMake build directory and compiled binaries.
+
+## Typical usage
+
+Compiler note: on this system, `/usr/bin/c++` points to GCC 7, while C++17 support is cleaner with newer GCC. We enforce this with `NN_FORCE_MODERN_GCC=ON` in CMake and default scripts to `NN_CXX_COMPILER=/usr/bin/g++`. Override if needed:
+
+```bash
+NN_CXX_COMPILER=/path/to/g++ bash scripts/run_serial_smoke.sh
+```
+
+Prepare dataset + run smoke:
+
+```bash
+bash scripts/build.sh
+bash scripts/run_serial_smoke.sh
+```
+
+Build once:
+
+```bash
+bash scripts/build.sh
+```
+
+Run performance benchmark (defaults):
+
+```bash
+bash scripts/run_serial_perf.sh
+```
+
+Run performance benchmark (custom):
+
+```bash
+EPOCHS=5 TRAIN_SAMPLES=8000 VAL_SAMPLES=1000 BATCH_SIZE=128 HIDDEN=256,128 \
+OUT_CSV=results/perf_custom.csv bash scripts/run_serial_perf.sh
+```
+
+Compare two runs with tolerances:
+
+```bash
+python3 scripts/compare_metrics.py results/serial_baseline.csv results/mpi_candidate.csv \
+  --loss-tol 0.05 --acc-tol 0.02
+```
+
+Direct binary run after build:
+
+```bash
+./build/serial_train \
+  --epochs 5 \
+  --batch 64 \
+  --train-samples 4096 \
+  --val-samples 512 \
+  --hidden 128,64 \
+  --data-dir data/mnist \
+  --output results/metrics.csv
+```
+
+## Current milestone status
+
+- Serial skeleton: complete.
+- Real MNIST integration: complete.
+- Shared serial/MPI-ready training orchestration: complete.
+- Next planned milestone: MPI model-parallel runner wired into the same parity contract.
