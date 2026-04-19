@@ -118,6 +118,7 @@ int main(int argc, char** argv) {
     std::string error_message;
     int rc = 0;
     bool mpi_initialized_here = false;
+    int mpi_rank = 0;
     if (mode == "serial") {
         rc = nn::run_serial_training(config, &error_message);
     } else {
@@ -125,6 +126,7 @@ int main(int argc, char** argv) {
         // Main owns MPI lifecycle so backend code can assume initialized MPI.
         MPI_Init(&argc, &argv);
         mpi_initialized_here = true;
+        MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
         rc = nn::run_mpi_data_parallel_training(config, &error_message);
 #else
         std::cerr << "This binary was built without MPI support.\n";
@@ -159,7 +161,9 @@ int main(int argc, char** argv) {
 #endif
     }
 
-    std::cout << "Training finished (" << mode << "). Metrics written to " << config.output_csv
-              << "\n";
+    if (mode != "mpi-dp" || mpi_rank == 0) {
+        std::cout << "Training finished (" << mode << "). Metrics written to " << config.output_csv
+                  << "\n";
+    }
     return 0;
 }
