@@ -30,29 +30,30 @@ Keep this separation:
 
 ## Step-by-step implementation plan
 
-### 1) Add MPI training entrypoint
+### 1) MPI data-parallel baseline (current phase)
 
-Create:
+Implemented/maintain:
 
-- `include/train_mpi.h`
-- `src/train_mpi.cpp`
+- `include/train_mpi_data_parallel.h`
+- `src/train_mpi_data_parallel.cpp`
 
-Implement:
+Entrypoint:
 
-- `int run_mpi_training(const TrainConfig& config, std::string* error_message);`
+- `int run_mpi_data_parallel_training(const TrainConfig& config, std::string* error_message);`
 
 Expected behavior:
 
-- Initialize/finalize MPI.
-- Use rank-aware execution and communication logic.
+- Initialize/finalize MPI in MPI binary path.
+- Use fixed global batch with rank-local slicing.
+- Use `MPI_Allreduce` for gradient averaging.
 - Write metrics CSV with same columns as serial, but with `mode=mpi`.
 
-### 2) Add MPI executable target in CMake
+### 2) MPI executable target in CMake
 
 Update `CMakeLists.txt`:
 
 - Find/link MPI.
-- Build `mpi_train` executable (or equivalent name).
+- Build `mpi_dp_train` executable.
 - Link shared core (`nn_core`) plus MPI libs.
 
 ### 3) Keep parity contract intact
@@ -66,13 +67,13 @@ Follow `docs/serial_mpi_parity.md` exactly for:
 
 Do not silently change these in one backend only.
 
-### 4) Add MPI run scripts
+### 4) MPI run scripts
 
 Add:
 
-- `scripts/run_mpi_smoke.sh`
-- `scripts/run_mpi_perf.sh`
-- `scripts/job-mpi.slurm`
+- `scripts/run_mpi_dp_smoke.sh`
+- `scripts/run_mpi_dp_perf.sh`
+- `scripts/job_mpi_dp.slurm`
 
 Use the same default configuration values/pattern as serial scripts.
 
@@ -86,9 +87,9 @@ Add a convenience script (for example `scripts/run_serial_vs_mpi_compare.sh`) th
 
 ## Minimum acceptance milestones
 
-### Milestone A: MPI skeleton builds
+### Milestone A: MPI DP skeleton builds
 
-- `mpi_train` compiles and runs with `mpirun -n 1`.
+- `mpi_dp_train` compiles and runs with `srun -N 1 -n 1`.
 - Produces CSV with required schema and `mode=mpi`.
 
 ### Milestone B: n=1 parity
@@ -98,7 +99,7 @@ Add a convenience script (for example `scripts/run_serial_vs_mpi_compare.sh`) th
 
 ### Milestone C: multi-rank correctness
 
-- Run `mpirun -n 2` and `mpirun -n 4`.
+- Run MPI DP with 2 and 4 ranks via `srun` (or script wrappers with `DP_NODES` / `DP_TASKS_PER_NODE`).
 - Metrics remain within documented tolerances vs serial baseline.
 
 ### Milestone D: performance runs
@@ -117,11 +118,13 @@ bash scripts/run_serial_perf.sh
 python3 scripts/compare_metrics.py results/smoke_metrics.csv results/smoke_metrics.csv
 ```
 
-Then after MPI binary exists:
+Then for MPI DP:
 
 ```bash
-mpirun -n 1 ./build/mpi_train --epochs 3 --batch 64 --train-samples 2048 --val-samples 256 --seed 42 --lr 0.03 --hidden 128,64 --data-dir data/mnist --output results/mpi_smoke.csv
-python3 scripts/compare_metrics.py results/smoke_metrics.csv results/mpi_smoke.csv --loss-tol 0.05 --acc-tol 0.02
+cpu 1
+DP_NODES=1 DP_TASKS_PER_NODE=2 GLOBAL_BATCH=128 bash scripts/run_mpi_dp_smoke.sh
+DP_NODES=1 DP_TASKS_PER_NODE=4 GLOBAL_BATCH=256 EPOCHS=10 bash scripts/run_mpi_dp_perf.sh
+python3 scripts/compare_metrics.py results/smoke_metrics.csv results/mpi_dp_smoke_metrics.csv --loss-tol 0.05 --acc-tol 0.02
 ```
 
 ## Common pitfalls to avoid
@@ -135,7 +138,7 @@ python3 scripts/compare_metrics.py results/smoke_metrics.csv results/mpi_smoke.c
 
 Handoff is complete when:
 
-- MPI backend is buildable/runnable.
+- MPI DP backend is buildable/runnable.
 - Serial-vs-MPI parity checks are scripted and reproducible.
 - Performance scripts produce consistent rank-scaling results.
 - README + this guide reflect the final MPI workflow.

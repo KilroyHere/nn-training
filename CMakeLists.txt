@@ -17,6 +17,7 @@ endif()
 
 message(STATUS "Using C++ compiler: ${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION})")
 find_package(BLAS REQUIRED)
+find_package(MPI REQUIRED)
 
 add_library(nn_core
     src/tensor.cpp
@@ -31,3 +32,8 @@ target_link_libraries(nn_core PUBLIC ${BLAS_LIBRARIES})
 
 add_executable(serial_train src/main.cpp)
 target_link_libraries(serial_train PRIVATE nn_core)
+target_compile_definitions(serial_train PRIVATE NN_ENABLE_MPI=0)
+
+add_executable(mpi_dp_train src/main.cpp src/train_mpi_data_parallel.cpp)
+target_link_libraries(mpi_dp_train PRIVATE nn_core MPI::MPI_CXX)
+target_compile_definitions(mpi_dp_train PRIVATE NN_ENABLE_MPI=1)

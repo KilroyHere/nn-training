@@ -86,7 +86,13 @@ BatchMetrics MLP::evaluate_batch(const Matrix& x, const std::vector<int>& y) con
     return compute_metrics(probs, y);
 }
 
-BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float learning_rate) {
+BatchMetrics MLP::compute_batch_gradients(
+    const Matrix& x,
+    const std::vector<int>& y,
+    GradientBuffers* gradients) {
+    if (gradients == nullptr) {
+        throw std::invalid_argument("compute_batch_gradients requires non-null gradients");
+    }
     std::vector<Matrix> activations;
     std::vector<Matrix> pre_activations;
     activations.reserve(layers_.size() + 1);
@@ -118,6 +124,10 @@ BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float 
     }
 
     Matrix grad = std::move(probs);
+    gradients->weight_grads.clear();
+    gradients->bias_grads.clear();
+    gradients->weight_grads.resize(layers_.size());
+    gradients->bias_grads.resize(layers_.size());
     for (int layer_idx = static_cast<int>(layers_.size()) - 1; layer_idx >= 0; --layer_idx) {
         const Matrix a_prev_t = transpose(activations[static_cast<size_t>(layer_idx)]);
         const Matrix grad_w = matmul(a_prev_t, grad);
@@ -153,10 +163,35 @@ BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float 
                 grad_prev, pre_activations[static_cast<size_t>(layer_idx - 1)]);
         }
 
-        Layer& layer = layers_[static_cast<size_t>(layer_idx)];
-        const int inc_update = 1;
+        gradients->weight_grads[static_cast<size_t>(layer_idx)] = grad_w;
+        gradients->bias_grads[static_cast<size_t>(layer_idx)] = grad_b;
+
+        if (layer_idx > 0) {
+            grad = std::move(grad_prev);
+        }
+    }
+
+    return metrics;
+}
+
+void MLP::apply_gradients(const GradientBuffers& gradients, float learning_rate) {
+    if (gradients.weight_grads.size() != layers_.size() ||
+        gradients.bias_grads.size() != layers_.size()) {
+        throw std::invalid_argument("Gradient buffer size mismatch in apply_gradients");
+    }
+    const int inc_update = 1;
+    const float alpha_update = -learning_rate;
+    for (size_t layer_idx = 0; layer_idx < layers_.size(); ++layer_idx) {
+        Layer& layer = layers_[layer_idx];
+        const Matrix& grad_w = gradients.weight_grads[layer_idx];
+        const std::vector<float>& grad_b = gradients.bias_grads[layer_idx];
+        if (grad_w.rows != layer.weights.rows || grad_w.cols != layer.weights.cols) {
+            throw std::invalid_argument("Weight gradient shape mismatch");
+        }
+        if (grad_b.size() != layer.bias.size()) {
+            throw std::invalid_argument("Bias gradient shape mismatch");
+        }
         const int weight_size = static_cast<int>(layer.weights.data.size());
-        const float alpha_update = -learning_rate;
         saxpy_(
             &weight_size,
             &alpha_update,
@@ -173,12 +208,13 @@ BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float 
             &inc_update,
             layer.bias.data(),
             &inc_update);
-
-        if (layer_idx > 0) {
-            grad = std::move(grad_prev);
-        }
     }
+}
 
+BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float learning_rate) {
+    GradientBuffers gradients;
+    const BatchMetrics metrics = compute_batch_gradients(x, y, &gradients);
+    apply_gradients(gradients, learning_rate);
     return metrics;
 }
 
