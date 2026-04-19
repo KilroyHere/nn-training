@@ -2,7 +2,7 @@
 
 Serial-first C++ neural-network training project using real MNIST IDX files.
 
-This repository is currently focused on the first milestone: a buildable serial training pipeline with reproducible smoke tests and scripts, which will later become the correctness baseline for MPI model parallelism.
+This repository currently supports both a serial training baseline and an MPI data-parallel baseline on MNIST, with shared parity rules and reproducible script workflows.
 
 For MPI contributor handoff tasks and execution order, see `NEXT_STEPS.md`.
 
@@ -79,7 +79,7 @@ nn_training/
   - Declares ops used by MLP implementation (`matmul`, `transpose`, `relu`, `softmax`).
 - `include/mlp.h`
   - Declares MLP class and batch metric struct.
-  - Exposes `train_batch(...)` and `evaluate_batch(...)`.
+  - Exposes `compute_batch_gradients(...)`, `apply_gradients(...)`, `train_batch(...)`, and `evaluate_batch(...)`.
 - `include/data_mnist.h`
   - Declares dataset structure and MNIST data-loading/subset APIs.
 - `include/train_common.h`
@@ -158,7 +158,7 @@ nn_training/
   - Run-only job launcher via `srun` (expects prebuilt binary).
 - `scripts/job_mpi_dp.slurm`
   - Slurm batch script for MPI data-parallel run.
-  - Enforces 1 thread per rank and launches binary directly in allocated context.
+  - Enforces 1 thread per rank and launches via `srun`.
 
 ### Docs (`docs/`)
 
@@ -183,6 +183,8 @@ NN_CXX_COMPILER=/path/to/g++ bash scripts/build.sh --clean
 ```
 
 BLAS note: scripts pin BLAS/OpenMP threads to 1 (`OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`) so serial and future MPI comparisons remain fair and reproducible.
+
+MPI script note: `run_mpi_dp_smoke.sh` and `run_mpi_dp_perf.sh` default to a single-rank launch (`DP_NODES=1`, `DP_TASKS_PER_NODE=1`). Set `DP_NODES` and `DP_TASKS_PER_NODE` explicitly for multi-rank runs.
 
 Prepare dataset + run serial smoke:
 
@@ -216,6 +218,13 @@ Run MPI DP performance (example: 4 ranks):
 ```bash
 DP_NODES=1 DP_TASKS_PER_NODE=4 GLOBAL_BATCH=256 EPOCHS=10 \
   OUT_CSV=results/mpi_dp_perf_metrics.csv bash scripts/run_mpi_dp_perf.sh
+```
+
+Run MPI DP performance (example: 2 nodes x 64 ranks):
+
+```bash
+DP_NODES=2 DP_TASKS_PER_NODE=64 GLOBAL_BATCH=256 EPOCHS=10 \
+  OUT_CSV=results/mpi_dp_perf_2n64r.csv bash scripts/run_mpi_dp_perf.sh
 ```
 
 Run performance benchmark (custom):
@@ -269,4 +278,6 @@ srun -N 1 -n 4 ./build/mpi_dp_train \
 - Serial skeleton: complete.
 - Real MNIST integration: complete.
 - BLAS-backed kernels for serial path: complete.
-- MPI data-parallel baseline (`MPI_Allreduce`): in progress.
+- MPI data-parallel baseline (`MPI_Allreduce`): implemented.
+- Common main/CLI dispatch (`serial` and `mpi-dp`): implemented.
+- Serial-vs-MPI parity validation sweeps: in progress.
