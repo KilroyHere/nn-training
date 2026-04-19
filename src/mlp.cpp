@@ -1,3 +1,4 @@
+// MLP forward/backward implementation and BLAS-backed SGD updates.
 #include "mlp.h"
 
 #include <algorithm>
@@ -25,6 +26,7 @@ void sgemv_(
 void saxpy_(const int* n, const float* alpha, const float* x, const int* incx, float* y, const int* incy);
 }
 
+// Computes average cross-entropy loss and top-1 accuracy.
 BatchMetrics compute_metrics(const Matrix& probs, const std::vector<int>& y) {
     if (probs.rows != static_cast<int>(y.size())) {
         throw std::invalid_argument("compute_metrics dimension mismatch");
@@ -56,6 +58,7 @@ BatchMetrics compute_metrics(const Matrix& probs, const std::vector<int>& y) {
 
 }  // namespace
 
+// Initializes layer weights and biases for the configured architecture.
 MLP::MLP(const std::vector<int>& layer_sizes, std::mt19937& rng) {
     if (layer_sizes.size() < 2) {
         throw std::invalid_argument("MLP requires at least input and output layers");
@@ -72,6 +75,7 @@ MLP::MLP(const std::vector<int>& layer_sizes, std::mt19937& rng) {
     }
 }
 
+// Runs inference-only forward pass and returns batch metrics.
 BatchMetrics MLP::evaluate_batch(const Matrix& x, const std::vector<int>& y) const {
     Matrix a = x;
     for (size_t i = 0; i < layers_.size(); ++i) {
@@ -86,6 +90,7 @@ BatchMetrics MLP::evaluate_batch(const Matrix& x, const std::vector<int>& y) con
     return compute_metrics(probs, y);
 }
 
+// Runs forward/backward pass and stores gradients without applying updates.
 BatchMetrics MLP::compute_batch_gradients(
     const Matrix& x,
     const std::vector<int>& y,
@@ -174,6 +179,7 @@ BatchMetrics MLP::compute_batch_gradients(
     return metrics;
 }
 
+// Applies precomputed gradients to model parameters with SGD.
 void MLP::apply_gradients(const GradientBuffers& gradients, float learning_rate) {
     if (gradients.weight_grads.size() != layers_.size() ||
         gradients.bias_grads.size() != layers_.size()) {
@@ -211,6 +217,7 @@ void MLP::apply_gradients(const GradientBuffers& gradients, float learning_rate)
     }
 }
 
+// Convenience serial path: compute gradients and apply immediately.
 BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float learning_rate) {
     GradientBuffers gradients;
     const BatchMetrics metrics = compute_batch_gradients(x, y, &gradients);

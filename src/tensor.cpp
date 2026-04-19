@@ -1,3 +1,4 @@
+// Matrix utilities and BLAS-backed primitive tensor operations.
 #include "tensor.h"
 
 #include <algorithm>
@@ -29,18 +30,23 @@ void saxpy_(const int* n, const float* alpha, const float* x, const int* incx, f
 
 }  // namespace
 
+// Builds a dense matrix initialized to a constant value.
 Matrix::Matrix(int r, int c, float value) : rows(r), cols(c), data(r * c, value) {}
 
+// Returns mutable element reference in row-major layout.
 float& Matrix::at(int r, int c) {
     return data[static_cast<size_t>(r) * static_cast<size_t>(cols) + static_cast<size_t>(c)];
 }
 
+// Returns read-only element reference in row-major layout.
 const float& Matrix::at(int r, int c) const {
     return data[static_cast<size_t>(r) * static_cast<size_t>(cols) + static_cast<size_t>(c)];
 }
 
+// Creates a zero-initialized matrix.
 Matrix zeros(int rows, int cols) { return Matrix(rows, cols, 0.0f); }
 
+// Creates a matrix with iid Gaussian samples.
 Matrix random_normal(int rows, int cols, float stddev, std::mt19937& rng) {
     Matrix out(rows, cols, 0.0f);
     std::normal_distribution<float> dist(0.0f, stddev);
@@ -50,6 +56,7 @@ Matrix random_normal(int rows, int cols, float stddev, std::mt19937& rng) {
     return out;
 }
 
+// Matrix multiply using BLAS with row-major to column-major mapping.
 Matrix matmul(const Matrix& a, const Matrix& b) {
     if (a.cols != b.rows) {
         throw std::invalid_argument("matmul dimension mismatch");
@@ -82,6 +89,7 @@ Matrix matmul(const Matrix& a, const Matrix& b) {
     return out;
 }
 
+// Returns matrix transpose.
 Matrix transpose(const Matrix& a) {
     Matrix out(a.cols, a.rows, 0.0f);
     for (int i = 0; i < a.rows; ++i) {
@@ -92,6 +100,7 @@ Matrix transpose(const Matrix& a) {
     return out;
 }
 
+// Adds vector b to each row of matrix a.
 void add_row_vector(Matrix* a, const std::vector<float>& b) {
     if (a == nullptr || a->cols != static_cast<int>(b.size())) {
         throw std::invalid_argument("add_row_vector dimension mismatch");
@@ -110,6 +119,7 @@ void add_row_vector(Matrix* a, const std::vector<float>& b) {
     }
 }
 
+// Applies ReLU activation in place.
 void relu_inplace(Matrix* a) {
     if (a == nullptr) {
         throw std::invalid_argument("relu_inplace received null matrix");
@@ -119,6 +129,7 @@ void relu_inplace(Matrix* a) {
     }
 }
 
+// Backpropagates through ReLU mask from pre-activations.
 Matrix relu_backward(const Matrix& grad, const Matrix& pre_activation) {
     if (grad.rows != pre_activation.rows || grad.cols != pre_activation.cols) {
         throw std::invalid_argument("relu_backward dimension mismatch");
@@ -130,6 +141,7 @@ Matrix relu_backward(const Matrix& grad, const Matrix& pre_activation) {
     return out;
 }
 
+// Applies numerically stable softmax independently per row.
 Matrix softmax_rows(const Matrix& logits) {
     Matrix out(logits.rows, logits.cols, 0.0f);
     for (int i = 0; i < logits.rows; ++i) {

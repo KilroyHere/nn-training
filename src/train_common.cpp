@@ -1,3 +1,4 @@
+// Shared training setup, dataset prep, and filesystem helper routines.
 #include "train_common.h"
 
 #include <algorithm>
@@ -10,6 +11,7 @@ namespace nn {
 
 namespace {
 
+// Creates a single directory path component if needed.
 bool ensure_dir(const std::string& path) {
     if (path.empty()) {
         return true;
@@ -23,6 +25,7 @@ bool ensure_dir(const std::string& path) {
 
 }  // namespace
 
+// Validates common training hyperparameters and sample counts.
 void validate_train_config(const TrainConfig& config) {
     if (config.batch_size <= 0 || config.epochs <= 0 || config.learning_rate <= 0.0f) {
         throw std::invalid_argument("batch_size, epochs, and learning_rate must be positive");
@@ -32,6 +35,7 @@ void validate_train_config(const TrainConfig& config) {
     }
 }
 
+// Loads MNIST and creates deterministic train/val subsets.
 PreparedDatasets prepare_datasets(const TrainConfig& config, std::mt19937* rng) {
     if (rng == nullptr) {
         throw std::invalid_argument("prepare_datasets requires non-null rng");
@@ -65,6 +69,7 @@ PreparedDatasets prepare_datasets(const TrainConfig& config, std::mt19937* rng) 
     return out;
 }
 
+// Builds full layer-size vector from config fields.
 std::vector<int> build_layer_sizes(const TrainConfig& config) {
     std::vector<int> layer_sizes;
     layer_sizes.push_back(config.input_dim);
@@ -73,6 +78,7 @@ std::vector<int> build_layer_sizes(const TrainConfig& config) {
     return layer_sizes;
 }
 
+// Converts hidden layer sizes to a stable CSV-friendly token.
 std::string hidden_layers_csv(const std::vector<int>& hidden_layers) {
     std::string out;
     for (size_t i = 0; i < hidden_layers.size(); ++i) {
@@ -84,6 +90,7 @@ std::string hidden_layers_csv(const std::vector<int>& hidden_layers) {
     return out;
 }
 
+// Recursively creates parent directory chain for a target file path.
 bool ensure_parent_dir(const std::string& file_path) {
     const size_t slash = file_path.find_last_of('/');
     if (slash == std::string::npos) {

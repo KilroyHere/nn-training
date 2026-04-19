@@ -1,3 +1,4 @@
+// Serial backend epoch loop, batching, metrics, and CSV output.
 #include "train_serial.h"
 
 #include <algorithm>
@@ -15,6 +16,7 @@ namespace nn {
 
 namespace {
 
+// Copies selected feature rows into a contiguous serial batch.
 Matrix gather_rows(const Matrix& m, const std::vector<int>& indices, int start, int count) {
     Matrix out(count, m.cols, 0.0f);
     for (int i = 0; i < count; ++i) {
@@ -26,6 +28,7 @@ Matrix gather_rows(const Matrix& m, const std::vector<int>& indices, int start, 
     return out;
 }
 
+// Copies selected labels into a contiguous serial batch.
 std::vector<int> gather_labels(
     const std::vector<int>& labels,
     const std::vector<int>& indices,
@@ -39,6 +42,7 @@ std::vector<int> gather_labels(
     return out;
 }
 
+// Runs one serial epoch including train loop and validation pass.
 EpochMetrics run_serial_epoch(
     MLP* model,
     const TrainConfig& config,
@@ -84,6 +88,7 @@ EpochMetrics run_serial_epoch(
 
 }  // namespace
 
+// Top-level serial training runner and CSV writer.
 int run_serial_training(const TrainConfig& config, std::string* error_message) {
     try {
         validate_train_config(config);

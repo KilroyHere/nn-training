@@ -1,3 +1,4 @@
+// MNIST IDX parsing and deterministic subset extraction utilities.
 #include "data_mnist.h"
 
 #include <algorithm>
@@ -9,6 +10,7 @@ namespace nn {
 
 namespace {
 
+// Reads a big-endian unsigned 32-bit value from MNIST headers.
 uint32_t read_be_u32(std::ifstream& in) {
     unsigned char bytes[4] = {0, 0, 0, 0};
     in.read(reinterpret_cast<char*>(bytes), 4);
@@ -23,6 +25,7 @@ uint32_t read_be_u32(std::ifstream& in) {
 
 }  // namespace
 
+// Loads MNIST IDX image/label files into normalized feature tensors.
 Dataset load_mnist_dataset(const std::string& image_path, const std::string& label_path, int max_samples) {
     std::ifstream image_in(image_path, std::ios::binary);
     std::ifstream label_in(label_path, std::ios::binary);
@@ -49,8 +52,9 @@ Dataset load_mnist_dataset(const std::string& image_path, const std::string& lab
     }
 
     const uint32_t available = std::min(image_count, label_count);
-    const uint32_t to_read =
-        max_samples > 0 ? std::min<uint32_t>(available, static_cast<uint32_t>(max_samples)) : available;
+    const uint32_t to_read = max_samples > 0
+                                 ? std::min<uint32_t>(available, static_cast<uint32_t>(max_samples))
+                                 : available;
     const int input_dim = static_cast<int>(rows * cols);
 
     Dataset dataset;
@@ -78,6 +82,7 @@ Dataset load_mnist_dataset(const std::string& image_path, const std::string& lab
     return dataset;
 }
 
+// Copies selected dataset rows into a compact subset dataset.
 Dataset subset_dataset(const Dataset& full, const std::vector<int>& indices) {
     if (full.features.rows != static_cast<int>(full.labels.size())) {
         throw std::runtime_error("Invalid dataset: rows != labels");

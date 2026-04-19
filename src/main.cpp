@@ -1,3 +1,4 @@
+// CLI entrypoint that dispatches to serial or MPI-DP training modes.
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -12,6 +13,7 @@
 
 namespace {
 
+// Prints CLI flags for serial and MPI-DP execution modes.
 void print_usage() {
     std::cout << "Usage: train [options]\n"
               << "Options:\n"
@@ -27,6 +29,7 @@ void print_usage() {
               << "  --output <path>\n";
 }
 
+// Parses hidden sizes from a comma-separated string.
 bool parse_hidden_layers(const std::string& text, std::vector<int>* out) {
     if (out == nullptr) {
         return false;
@@ -47,12 +50,14 @@ bool parse_hidden_layers(const std::string& text, std::vector<int>* out) {
     return true;
 }
 
+// Defaults mode from binary name to keep wrappers simple.
 std::string infer_default_mode(const std::string& argv0) {
     return argv0.find("mpi_dp") != std::string::npos ? "mpi-dp" : "serial";
 }
 
 }  // namespace
 
+// Parses CLI args and dispatches into the selected backend.
 int main(int argc, char** argv) {
     nn::TrainConfig config;
     std::string mode = infer_default_mode(argc > 0 ? argv[0] : "");
@@ -117,6 +122,7 @@ int main(int argc, char** argv) {
         rc = nn::run_serial_training(config, &error_message);
     } else {
 #if NN_ENABLE_MPI
+        // Main owns MPI lifecycle so backend code can assume initialized MPI.
         MPI_Init(&argc, &argv);
         mpi_initialized_here = true;
         rc = nn::run_mpi_data_parallel_training(config, &error_message);

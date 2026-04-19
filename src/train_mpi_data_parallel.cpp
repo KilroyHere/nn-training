@@ -1,3 +1,4 @@
+// MPI data-parallel training loop and gradient synchronization logic.
 #include "train_mpi_data_parallel.h"
 
 #include <algorithm>
@@ -17,6 +18,7 @@ namespace nn {
 
 namespace {
 
+// Copies selected feature rows into a contiguous batch matrix.
 Matrix gather_rows(const Matrix& m, const std::vector<int>& indices, int start, int count) {
     Matrix out(count, m.cols, 0.0f);
     for (int i = 0; i < count; ++i) {
@@ -28,6 +30,7 @@ Matrix gather_rows(const Matrix& m, const std::vector<int>& indices, int start, 
     return out;
 }
 
+// Copies selected labels into a contiguous batch vector.
 std::vector<int> gather_labels(
     const std::vector<int>& labels,
     const std::vector<int>& indices,
@@ -41,6 +44,7 @@ std::vector<int> gather_labels(
     return out;
 }
 
+// All-reduces gradients across ranks and converts sums to means.
 void allreduce_gradients(GradientBuffers* gradients, int world_size, MPI_Comm comm) {
     if (gradients == nullptr) {
         throw std::invalid_argument("allreduce_gradients requires non-null gradients");
@@ -78,6 +82,7 @@ void allreduce_gradients(GradientBuffers* gradients, int world_size, MPI_Comm co
     }
 }
 
+// Runs one MPI-DP epoch with fixed global-batch semantics.
 EpochMetrics run_mpi_dp_epoch(
     MLP* model,
     const TrainConfig& config,
@@ -98,6 +103,7 @@ EpochMetrics run_mpi_dp_epoch(
     const int local_batch = config.batch_size / world_size;
     std::shuffle(epoch_indices->begin(), epoch_indices->end(), *rng);
 
+    // Barrier-align timing so epoch time reflects global wall-clock progress.
     MPI_Barrier(comm);
     const auto start = std::chrono::high_resolution_clock::now();
 
@@ -123,6 +129,7 @@ EpochMetrics run_mpi_dp_epoch(
         throw std::runtime_error("No train steps executed; batch_size too large?");
     }
 
+    // Aggregate per-rank running sums/steps into global means.
     double loss_acc_steps[3] = {
         static_cast<double>(local_running_loss),
         static_cast<double>(local_running_acc),
@@ -152,6 +159,7 @@ EpochMetrics run_mpi_dp_epoch(
 
 }  // namespace
 
+// Top-level MPI data-parallel training runner and CSV writer.
 int run_mpi_data_parallel_training(const TrainConfig& config, std::string* error_message) {
     try {
         validate_train_config(config);
