@@ -18,6 +18,11 @@ struct GradientBuffers {
     std::vector<std::vector<float>> bias_grads;
 };
 
+struct Layer {
+    Matrix weights;
+    std::vector<float> bias;
+};
+
 class MLP {
 public:
     MLP(const std::vector<int>& layer_sizes, std::mt19937& rng);
@@ -31,11 +36,6 @@ public:
     BatchMetrics evaluate_batch(const Matrix& x, const std::vector<int>& y) const;
 
 private:
-    struct Layer {
-        Matrix weights;
-        std::vector<float> bias;
-    };
-
     std::vector<Layer> layers_;
 };
 

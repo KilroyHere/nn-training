@@ -8,6 +8,7 @@
 #if NN_ENABLE_MPI
 #include <mpi.h>
 #include "train_mpi_data_parallel.h"
+#include "train_mpi_model_parallel.h"
 #endif
 #include "train_serial.h"
 
@@ -17,7 +18,7 @@ namespace {
 void print_usage() {
     std::cout << "Usage: train [options]\n"
               << "Options:\n"
-              << "  --mode <serial|mpi-dp>\n"
+              << "  --mode <serial|mpi-dp|mpi-mp>\n"
               << "  --epochs <int>\n"
               << "  --batch <int>\n"
               << "  --lr <float>\n"
@@ -109,7 +110,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (mode != "serial" && mode != "mpi-dp") {
+    if (mode != "serial" && mode != "mpi-dp" && mode != "mpi-mp") {
         std::cerr << "Unsupported mode: " << mode << "\n";
         print_usage();
         return 1;
@@ -127,7 +128,11 @@ int main(int argc, char** argv) {
         MPI_Init(&argc, &argv);
         mpi_initialized_here = true;
         MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
-        rc = nn::run_mpi_data_parallel_training(config, &error_message);
+        if (mode == "mpi-dp") {
+            rc = nn::run_mpi_data_parallel_training(config, &error_message);
+        } else if (mode == "mpi-mp") {
+            rc = nn::run_mpi_model_parallel_training(config, &error_message);
+        }
 #else
         std::cerr << "This binary was built without MPI support.\n";
         return 1;
@@ -161,7 +166,7 @@ int main(int argc, char** argv) {
 #endif
     }
 
-    if (mode != "mpi-dp" || mpi_rank == 0) {
+    if ((mode != "mpi-dp" && mode != "mpi-mp") || mpi_rank == 0) {
         std::cout << "Training finished (" << mode << "). Metrics written to " << config.output_csv
                   << "\n";
     }
