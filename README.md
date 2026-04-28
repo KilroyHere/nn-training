@@ -2,7 +2,12 @@
 
 Serial-first C++ neural-network training project using real MNIST IDX files.
 
-This repository currently supports both a serial training baseline and an MPI data-parallel baseline on MNIST, with shared parity rules and reproducible script workflows.
+This repository currently supports serial training plus two MPI backends on MNIST:
+
+- MPI data parallel (`mpi-dp`)
+- MPI model parallel (`mpi-mp`)
+
+The serial-vs-MPI parity contract is currently defined for the data-parallel path.
 
 For MPI contributor handoff tasks and execution order, see `NEXT_STEPS.md`.
 
@@ -15,7 +20,7 @@ For MPI contributor handoff tasks and execution order, see `NEXT_STEPS.md`.
 - Provides scripts for:
   - MNIST download/prep
   - local smoke runs
-  - cluster batch launch for serial and MPI-DP runs
+  - cluster batch launch for serial, MPI-DP, and MPI-MP runs
 
 ## Repository structure
 
@@ -31,15 +36,20 @@ nn_training/
 │   ├── data_mnist.h
 │   ├── train_common.h
 │   ├── train_serial.h
-│   └── train_mpi_data_parallel.h
+│   ├── train_mpi_data_parallel.h
+│   └── train_mpi_model_parallel.h
 ├── src/
-│   ├── main.cpp
+│   ├── train_cli.cpp
+│   ├── main_serial.cpp
+│   ├── main_mpi_dp.cpp
+│   ├── main_mpi_mp.cpp
 │   ├── tensor.cpp
 │   ├── mlp.cpp
 │   ├── data_mnist.cpp
 │   ├── train_common.cpp
 │   ├── train_serial.cpp
-│   └── train_mpi_data_parallel.cpp
+│   ├── train_mpi_data_parallel.cpp
+│   └── train_mpi_model_parallel.cpp
 ├── scripts/
 │   ├── prepare_mnist.sh
 │   ├── build.sh
@@ -49,7 +59,10 @@ nn_training/
 │   ├── run_mpi_dp_perf.sh
 │   ├── compare_metrics.py
 │   ├── job-serial.slurm
-│   └── job_mpi_dp.slurm
+│   ├── job_mpi_dp.slurm
+│   ├── run_mpi_mp_smoke.sh
+│   ├── run_mpi_mp_perf.sh
+│   └── job_mpi_mp.slurm
 ├── docs/
 │   └── serial_mpi_parity.md
 ├── data/
@@ -65,7 +78,7 @@ nn_training/
   - Defines the C++17 build.
   - Discovers and links MPI (`find_package(MPI REQUIRED)`).
   - Discovers and links BLAS (`find_package(BLAS REQUIRED)`).
-  - Builds `nn_core`, `serial_train`, and `mpi_dp_train`.
+  - Builds `nn_core`, `serial_train`, `mpi_dp_train`, and `mpi_mp_train`.
 - `.gitignore`
   - Ignores build artifacts and generated results/data outputs.
 
@@ -85,17 +98,25 @@ nn_training/
 - `include/train_common.h`
   - Shared training utilities (config/dataset prep, metadata helpers, parity-safe helpers).
 - `include/train_serial.h`
-  - Declares serial training entrypoint used by `main.cpp`.
+  - Declares serial training entrypoint used by `main_serial.cpp`.
 - `include/train_mpi_data_parallel.h`
   - Declares MPI data-parallel training entrypoint.
+- `include/train_mpi_model_parallel.h`
+  - Declares MPI model-parallel training entrypoint.
+- `include/train_cli.h`
+  - Declares shared CLI argument parsing helpers used by all entrypoints.
 
 ### Source implementation (`src/`)
 
-- `src/main.cpp`
-  - Shared CLI front-end for training binaries.
+- `src/train_cli.cpp`
+  - Shared CLI parser for all train binaries.
   - Parses options like `--epochs`, `--batch`, `--hidden`, `--data-dir`, `--output`.
-  - Builds `TrainConfig`, dispatches by `--mode` (`serial|mpi-dp`).
-  - `serial_train` defaults to serial mode; `mpi_dp_train` defaults to mpi-dp mode.
+- `src/main_serial.cpp`
+  - Serial-only CLI entrypoint.
+- `src/main_mpi_dp.cpp`
+  - MPI data-parallel-only CLI entrypoint.
+- `src/main_mpi_mp.cpp`
+  - MPI model-parallel-only CLI entrypoint.
 - `src/tensor.cpp`
   - Implements matrix storage and numeric primitives.
   - Uses BLAS `sgemm_` / `saxpy_` calls for core matrix multiply and row-bias accumulation.
@@ -117,6 +138,11 @@ nn_training/
     - fixed global batch, rank-local batch slicing
     - gradient averaging via `MPI_Allreduce`
     - rank-0 CSV output with parity-compatible schema
+- `src/train_mpi_model_parallel.cpp`
+  - MPI model-parallel backend runner:
+    - partitions layer ranges across ranks
+    - ships forward activations and backward gradients between adjacent ranks
+    - writes rank-0 CSV output for smoke/perf workflows
 - `src/train_common.cpp`
   - Backend-neutral setup and parity helpers:
     - validates train config
@@ -151,6 +177,14 @@ nn_training/
   - MPI data-parallel performance run with fixed global batch semantics.
   - Invokes `srun` internally using `DP_NODES` and `DP_TASKS_PER_NODE`.
   - Prints allocation and launch configuration before starting.
+- `scripts/run_mpi_mp_smoke.sh`
+  - MPI model-parallel smoke run.
+  - Invokes `srun` internally using `MP_NODES` and `MP_TASKS_PER_NODE`.
+  - Validates requested resources against current Slurm allocation.
+- `scripts/run_mpi_mp_perf.sh`
+  - MPI model-parallel performance run.
+  - Invokes `srun` internally using `MP_NODES` and `MP_TASKS_PER_NODE`.
+  - Prints allocation and launch configuration before starting.
 - `scripts/compare_metrics.py`
   - Compares two metrics CSVs with tolerance checks (useful for future serial-vs-MPI correctness gates).
 - `scripts/job-serial.slurm`
@@ -158,6 +192,9 @@ nn_training/
   - Run-only job launcher via `srun` (expects prebuilt binary).
 - `scripts/job_mpi_dp.slurm`
   - Slurm batch script for MPI data-parallel run.
+  - Enforces 1 thread per rank and launches via `srun`.
+- `scripts/job_mpi_mp.slurm`
+  - Slurm batch script for MPI model-parallel run.
   - Enforces 1 thread per rank and launches via `srun`.
 
 ### Docs (`docs/`)
@@ -227,6 +264,19 @@ DP_NODES=2 DP_TASKS_PER_NODE=64 GLOBAL_BATCH=256 EPOCHS=10 \
   OUT_CSV=results/mpi_dp_perf_2n64r.csv bash scripts/run_mpi_dp_perf.sh
 ```
 
+Run MPI MP smoke (example: 2 ranks):
+
+```bash
+MP_NODES=1 MP_TASKS_PER_NODE=2 GLOBAL_BATCH=128 bash scripts/run_mpi_mp_smoke.sh
+```
+
+Run MPI MP performance (example: 4 ranks):
+
+```bash
+MP_NODES=1 MP_TASKS_PER_NODE=4 BATCH_SIZE=64 EPOCHS=10 \
+  OUT_CSV=results/mpi_mp_perf_1n4r.csv bash scripts/run_mpi_mp_perf.sh
+```
+
 Run performance benchmark (custom):
 
 ```bash
@@ -254,12 +304,6 @@ Direct binary run after build:
   --output results/metrics.csv
 ```
 
-Common-main override examples:
-
-```bash
-./build/serial_train --mode serial --epochs 2 --batch 64 --train-samples 2048 --val-samples 256 --data-dir data/mnist --output results/serial_mode_check.csv
-```
-
 Direct MPI DP binary run (after build; launch with `srun`):
 
 ```bash
@@ -273,11 +317,25 @@ srun -N 1 -n 4 ./build/mpi_dp_train \
   --output results/mpi_dp_metrics.csv
 ```
 
+Direct MPI MP binary run (after build; launch with `srun`):
+
+```bash
+srun -N 1 -n 2 ./build/mpi_mp_train \
+  --epochs 3 \
+  --batch 128 \
+  --train-samples 2048 \
+  --val-samples 256 \
+  --hidden 128,64 \
+  --data-dir data/mnist \
+  --output results/mpi_mp_metrics.csv
+```
+
 ## Current milestone status
 
 - Serial skeleton: complete.
 - Real MNIST integration: complete.
 - BLAS-backed kernels for serial path: complete.
 - MPI data-parallel baseline (`MPI_Allreduce`): implemented.
-- Common main/CLI dispatch (`serial` and `mpi-dp`): implemented.
-- Serial-vs-MPI parity validation sweeps: in progress.
+- MPI model-parallel baseline (layer partitioning across ranks): implemented.
+- Split CLI entrypoints (`serial_train`, `mpi_dp_train`, `mpi_mp_train`): implemented.
+- Serial-vs-MPI-DP parity validation sweeps: in progress.

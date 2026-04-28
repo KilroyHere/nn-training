@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 OUT_CSV="${ROOT_DIR}/results/mpi_mp_smoke_metrics.csv"
-MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_dp_train}"
+MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_mp_train}"
 MP_NODES="${MP_NODES:-1}"
 MP_TASKS_PER_NODE="${MP_TASKS_PER_NODE:-2}"
 MP_CPUS_PER_TASK="${MP_CPUS_PER_TASK:-1}"
@@ -57,7 +57,6 @@ srun --nodes="${MP_NODES}" \
      --ntasks-per-node="${MP_TASKS_PER_NODE}" \
      --cpus-per-task="${MP_CPUS_PER_TASK}" \
      "${MPI_BIN}" \
-     --mode mpi-mp \
      --epochs "${SMOKE_EPOCHS}" \
      --batch "${SMOKE_GLOBAL_BATCH}" \
      --train-samples "${SMOKE_TRAIN_SAMPLES}" \

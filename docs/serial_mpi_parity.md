@@ -1,6 +1,8 @@
-# Serial vs MPI DP Parity Contract
+# Serial vs MPI-DP Parity Contract
 
 This file defines the parity rules between `serial_train` and `mpi_dp_train`.
+
+Model-parallel runs (`mpi_mp_train`) are currently out of scope for this contract.
 
 ## Core parity rules
 

@@ -15,6 +15,7 @@ BUILD_DIR="${ROOT_DIR}/build"
 MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_dp_train}"
 DP_NODES="${DP_NODES:-${SLURM_JOB_NUM_NODES:-1}}"
 DP_TASKS_PER_NODE="${DP_TASKS_PER_NODE:-${SLURM_NTASKS_PER_NODE:-64}}"
+DP_CPUS_PER_TASK="${DP_CPUS_PER_TASK:-1}"
 DP_EPOCHS="${DP_EPOCHS:-10}"
 DP_GLOBAL_BATCH="${DP_GLOBAL_BATCH:-256}"
 DP_TRAIN_SAMPLES="${DP_TRAIN_SAMPLES:-12000}"
@@ -44,13 +45,13 @@ DP_NTASKS=$((DP_NODES * DP_TASKS_PER_NODE))
 
 echo "MPI DP batch launch config:"
 echo "  allocation: job_id=${SLURM_JOB_ID:-none} nodes=${SLURM_JOB_NUM_NODES:-unknown} ntasks=${SLURM_NTASKS:-unknown}"
-echo "  srun args:  nodes=${DP_NODES} ntasks=${DP_NTASKS} tasks_per_node=${DP_TASKS_PER_NODE} cpus_per_task=${SLURM_CPUS_PER_TASK:-1}"
+echo "  srun args:  nodes=${DP_NODES} ntasks=${DP_NTASKS} tasks_per_node=${DP_TASKS_PER_NODE} cpus_per_task=${DP_CPUS_PER_TASK}"
 echo "  train args: epochs=${DP_EPOCHS} global_batch=${DP_GLOBAL_BATCH} train_samples=${DP_TRAIN_SAMPLES} val_samples=${DP_VAL_SAMPLES}"
 
 srun \
   --nodes "${DP_NODES}" \
   --ntasks "${DP_NTASKS}" \
-  --cpus-per-task "${SLURM_CPUS_PER_TASK:-1}" \
+  --cpus-per-task "${DP_CPUS_PER_TASK}" \
   --cpu-bind=cores \
   "${MPI_BIN}" \
   --epochs "${DP_EPOCHS}" \

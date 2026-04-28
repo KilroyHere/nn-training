@@ -1,6 +1,8 @@
 # NEXT STEPS: MPI Handoff Guide
 
 This document tracks remaining work after the MPI-DP baseline integration.
+The repository now also contains an MPI model-parallel path (`mpi_mp_train`), but this
+handoff guide remains focused on serial-vs-MPI-DP parity and scaling validation.
 Read this together with `README.md`.
 
 ## Current state (what already works)
@@ -9,7 +11,7 @@ Read this together with `README.md`.
 - Shared setup/parity helpers are in `train_common`.
 - Serial backend logic is in `train_serial`.
 - MPI-DP backend logic is in `train_mpi_data_parallel`.
-- Common CLI dispatch is in `main.cpp` (`--mode serial|mpi-dp`).
+- CLI entrypoints are split by executable (`main_serial.cpp`, `main_mpi_dp.cpp`, `main_mpi_mp.cpp`).
 - MPI run scripts launch with `srun` and print launch config.
 - Metrics comparison tooling already exists.
 
@@ -17,7 +19,7 @@ Key files:
 
 - `src/train_serial.cpp` (serial backend implementation)
 - `src/train_mpi_data_parallel.cpp`, `include/train_mpi_data_parallel.h` (MPI-DP backend)
-- `src/main.cpp` (shared entrypoint and mode dispatch)
+- `src/main_mpi_dp.cpp`, `src/main_mpi_mp.cpp`, `src/main_serial.cpp` (entrypoints)
 - `src/train_common.cpp`, `include/train_common.h` (shared setup/parity helpers)
 - `src/mlp.cpp`, `src/tensor.cpp`, `src/data_mnist.cpp` (model + math + data)
 - `docs/serial_mpi_parity.md` (parity contract)
@@ -26,7 +28,7 @@ Key files:
 
 ## Goal for the next phase
 
-Lock down serial-vs-MPI parity and performance measurement workflows so future backends (model parallel/FSDP) can reuse the same baseline methodology.
+Lock down serial-vs-MPI parity and performance measurement workflows so additional backends can reuse the same baseline methodology.
 
 Keep this separation:
 

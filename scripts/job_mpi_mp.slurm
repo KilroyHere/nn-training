@@ -12,9 +12,10 @@ set -euo pipefail
 
 ROOT_DIR="${SLURM_SUBMIT_DIR}"
 BUILD_DIR="${ROOT_DIR}/build"
-MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_dp_train}"
+MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_mp_train}"
 MP_NODES="${MP_NODES:-${SLURM_JOB_NUM_NODES:-1}}"
 MP_TASKS_PER_NODE="${MP_TASKS_PER_NODE:-${SLURM_NTASKS_PER_NODE:-2}}"
+MP_CPUS_PER_TASK="${MP_CPUS_PER_TASK:-1}"
 MP_EPOCHS="${MP_EPOCHS:-3}"
 MP_GLOBAL_BATCH="${MP_GLOBAL_BATCH:-64}"
 MP_TRAIN_SAMPLES="${MP_TRAIN_SAMPLES:-2048}"
@@ -36,8 +37,35 @@ if [[ ! -x "${MPI_BIN}" ]]; then
   exit 1
 fi
 
-"${MPI_BIN}" \
-  --mode mpi-mp \
+if [[ "${MP_TASKS_PER_NODE}" == *"("* ]]; then
+  MP_TASKS_PER_NODE="${MP_TASKS_PER_NODE%%(*}"
+fi
+
+MP_NTASKS=$((MP_NODES * MP_TASKS_PER_NODE))
+
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+  ALLOC_NODES="${SLURM_JOB_NUM_NODES:-${MP_NODES}}"
+  ALLOC_TASKS="${SLURM_NTASKS:-${MP_NTASKS}}"
+  if (( MP_NODES > ALLOC_NODES )) || (( MP_NTASKS > ALLOC_TASKS )); then
+    echo "Requested srun resources exceed current allocation." >&2
+    echo "  requested: nodes=${MP_NODES}, ntasks=${MP_NTASKS}" >&2
+    echo "  allocated: nodes=${ALLOC_NODES}, ntasks=${ALLOC_TASKS}" >&2
+    echo "Reduce MP_NODES/MP_TASKS_PER_NODE, or request a larger allocation." >&2
+    exit 1
+  fi
+fi
+
+echo "MPI MP batch launch config:"
+echo "  allocation: job_id=${SLURM_JOB_ID:-none} nodes=${SLURM_JOB_NUM_NODES:-unknown} ntasks=${SLURM_NTASKS:-unknown}"
+echo "  srun args:  nodes=${MP_NODES} ntasks=${MP_NTASKS} tasks_per_node=${MP_TASKS_PER_NODE} cpus_per_task=${MP_CPUS_PER_TASK}"
+echo "  train args: epochs=${MP_EPOCHS} global_batch=${MP_GLOBAL_BATCH} train_samples=${MP_TRAIN_SAMPLES} val_samples=${MP_VAL_SAMPLES}"
+
+srun \
+  --nodes "${MP_NODES}" \
+  --ntasks "${MP_NTASKS}" \
+  --cpus-per-task "${MP_CPUS_PER_TASK}" \
+  --cpu-bind=cores \
+  "${MPI_BIN}" \
   --epochs "${MP_EPOCHS}" \
   --batch "${MP_GLOBAL_BATCH}" \
   --train-samples "${MP_TRAIN_SAMPLES}" \

@@ -5,9 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 RESULT_DIR="${ROOT_DIR}/results"
 OUT_CSV="${OUT_CSV:-${RESULT_DIR}/mpi_mp_perf_metrics.csv}"
-MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_dp_train}"
-MP_NODES="${MP_NODES:-4}"
-MP_TASKS_PER_NODE="${MP_TASKS_PER_NODE:-1}"
+MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_mp_train}"
+MP_NODES="${MP_NODES:-1}"
+MP_TASKS_PER_NODE="${MP_TASKS_PER_NODE:-2}"
 MP_CPUS_PER_TASK="${MP_CPUS_PER_TASK:-1}"
 
 EPOCHS="${EPOCHS:-10}"
@@ -16,7 +16,7 @@ TRAIN_SAMPLES="${TRAIN_SAMPLES:-50000}"
 VAL_SAMPLES="${VAL_SAMPLES:-10000}"
 LEARNING_RATE="${LEARNING_RATE:-0.03}"
 SEED="${SEED:-42}"
-HIDDEN="${HIDDEN:-128,64,32}"
+HIDDEN="${HIDDEN:-128,64}"
 DATA_DIR="${DATA_DIR:-${ROOT_DIR}/data/mnist}"
 
 export OMP_NUM_THREADS=1
@@ -66,7 +66,6 @@ srun \
   --cpus-per-task "${MP_CPUS_PER_TASK}" \
   --cpu-bind=cores \
   "${MPI_BIN}" \
-  --mode mpi-mp \
   --epochs "${EPOCHS}" \
   --batch "${BATCH_SIZE}" \
   --train-samples "${TRAIN_SAMPLES}" \
