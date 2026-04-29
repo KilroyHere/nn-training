@@ -74,8 +74,10 @@ EpochMetrics run_serial_epoch(
         throw std::runtime_error("No train steps executed; batch_size too large?");
     }
 
-    const BatchMetrics val_metrics = model->evaluate_batch(val.features, val.labels);
+    // Stop clock here — epoch_time_ms is training only, val eval excluded.
     const auto end = std::chrono::high_resolution_clock::now();
+
+    const BatchMetrics val_metrics = model->evaluate_batch(val.features, val.labels);
 
     EpochMetrics out;
     out.train_loss = running_loss / static_cast<float>(steps);

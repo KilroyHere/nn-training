@@ -22,7 +22,7 @@ struct EpochMetrics {
     float train_acc = 0.0f;
     float val_loss = 0.0f;
     float val_acc = 0.0f;
-    long long epoch_time_ms = 0;
+    long long epoch_time_ms = 0;  // training only: compute + gradient sync, excludes val eval
 };
 
 void validate_train_config(const TrainConfig& config);

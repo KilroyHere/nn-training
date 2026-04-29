@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
-OUT_CSV="${ROOT_DIR}/results/mpi_dp_smoke_metrics.csv"
-MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_dp_train}"
+OUT_CSV="${OUT_CSV:-${ROOT_DIR}/results/mpi_dp_hierarchial_smoke_metrics.csv}"
+MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_dp_hierarchial_train}"
 DP_NODES="${DP_NODES:-2}"
 DP_TASKS_PER_NODE="${DP_TASKS_PER_NODE:-32}"
 DP_CPUS_PER_TASK="${DP_CPUS_PER_TASK:-1}"
@@ -25,7 +25,7 @@ mkdir -p "${ROOT_DIR}/results"
 bash "${ROOT_DIR}/scripts/prepare_mnist.sh"
 
 if [[ ! -x "${MPI_BIN}" ]]; then
-  echo "Missing MPI DP binary: ${MPI_BIN}" >&2
+  echo "Missing MPI DP hierarchial binary: ${MPI_BIN}" >&2
   echo "Build first with: bash ${ROOT_DIR}/scripts/build.sh" >&2
   exit 1
 fi
@@ -53,7 +53,7 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   fi
 fi
 
-echo "MPI DP smoke launch config:"
+echo "MPI DP hierarchial smoke launch config:"
 echo "  allocation: job_id=${SLURM_JOB_ID:-none} nodes=${SLURM_JOB_NUM_NODES:-unknown} ntasks=${SLURM_NTASKS:-unknown}"
 echo "  srun args:  nodes=${DP_NODES} ntasks=${DP_NTASKS} tasks_per_node=${DP_TASKS_PER_NODE} cpus_per_task=${DP_CPUS_PER_TASK}"
 echo "  train args: epochs=${SMOKE_EPOCHS} global_batch=${SMOKE_GLOBAL_BATCH} train_samples=${SMOKE_TRAIN_SAMPLES} val_samples=${SMOKE_VAL_SAMPLES}"
@@ -74,4 +74,4 @@ srun \
   --data-dir "${ROOT_DIR}/data/mnist" \
   --output "${OUT_CSV}"
 
-echo "MPI DP smoke run complete: ${OUT_CSV} (nodes=${DP_NODES}, ntasks=${DP_NTASKS})"
+echo "MPI DP hierarchial smoke run complete: ${OUT_CSV} (nodes=${DP_NODES}, ntasks=${DP_NTASKS})"

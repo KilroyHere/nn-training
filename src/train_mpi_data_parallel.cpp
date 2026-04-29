@@ -44,15 +44,36 @@ std::vector<int> gather_labels(
     return out;
 }
 
+// Returns a contiguous submatrix of rows [start, start+count).
+Matrix slice_rows(const Matrix& m, int start, int count) {
+    Matrix out(count, m.cols, 0.0f);
+    for (int i = 0; i < count; ++i) {
+        for (int j = 0; j < m.cols; ++j) {
+            out.at(i, j) = m.at(start + i, j);
+        }
+    }
+    return out;
+}
+
+// Returns a contiguous slice of labels [start, start+count).
+std::vector<int> slice_labels(const std::vector<int>& labels, int start, int count) {
+    return std::vector<int>(
+        labels.begin() + start,
+        labels.begin() + start + count);
+}
+
 // All-reduces gradients across ranks and converts sums to means.
-void allreduce_gradients(GradientBuffers* gradients, int world_size, MPI_Comm comm) {
+// Returns time spent in MPI_Allreduce calls in seconds.
+double allreduce_gradients(GradientBuffers* gradients, int world_size, MPI_Comm comm) {
     if (gradients == nullptr) {
         throw std::invalid_argument("allreduce_gradients requires non-null gradients");
     }
+    double allreduce_elapsed = 0.0;
     for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
         Matrix& grad_w = gradients->weight_grads[i];
         std::vector<float>& grad_b = gradients->bias_grads[i];
 
+        double t0 = MPI_Wtime();
         MPI_Allreduce(
             MPI_IN_PLACE,
             grad_w.data.data(),
@@ -67,6 +88,7 @@ void allreduce_gradients(GradientBuffers* gradients, int world_size, MPI_Comm co
             MPI_FLOAT,
             MPI_SUM,
             comm);
+        allreduce_elapsed += MPI_Wtime() - t0;
     }
 
     const float inv_world = 1.0f / static_cast<float>(world_size);
@@ -80,6 +102,7 @@ void allreduce_gradients(GradientBuffers* gradients, int world_size, MPI_Comm co
             v *= inv_world;
         }
     }
+    return allreduce_elapsed;
 }
 
 // Runs one MPI-DP epoch with fixed global-batch semantics.
@@ -110,14 +133,19 @@ EpochMetrics run_mpi_dp_epoch(
     float local_running_loss = 0.0f;
     float local_running_acc = 0.0f;
     int local_steps = 0;
+    double total_compute_s = 0.0;
+    double total_allreduce_s = 0.0;
     for (int pos = 0; pos + config.batch_size <= train.features.rows; pos += config.batch_size) {
         const int local_start = pos + (rank * local_batch);
         const Matrix x_batch = gather_rows(train.features, *epoch_indices, local_start, local_batch);
         const std::vector<int> y_batch = gather_labels(train.labels, *epoch_indices, local_start, local_batch);
 
         GradientBuffers gradients;
+        double t_compute = MPI_Wtime();
         const BatchMetrics local_metrics = model->compute_batch_gradients(x_batch, y_batch, &gradients);
-        allreduce_gradients(&gradients, world_size, comm);
+        total_compute_s += MPI_Wtime() - t_compute;
+
+        total_allreduce_s += allreduce_gradients(&gradients, world_size, comm);
         model->apply_gradients(gradients, config.learning_rate);
 
         local_running_loss += local_metrics.loss;
@@ -129,7 +157,7 @@ EpochMetrics run_mpi_dp_epoch(
         throw std::runtime_error("No train steps executed; batch_size too large?");
     }
 
-    // Aggregate per-rank running sums/steps into global means.
+    // Aggregate per-rank training loss/acc into global means.
     double loss_acc_steps[3] = {
         static_cast<double>(local_running_loss),
         static_cast<double>(local_running_acc),
@@ -137,23 +165,44 @@ EpochMetrics run_mpi_dp_epoch(
     double global_loss_acc_steps[3] = {0.0, 0.0, 0.0};
     MPI_Allreduce(loss_acc_steps, global_loss_acc_steps, 3, MPI_DOUBLE, MPI_SUM, comm);
 
+    // Stop clock here — epoch_time_ms covers only the training loop + train metric reduce.
+    MPI_Barrier(comm);
+    const auto end = std::chrono::high_resolution_clock::now();
+
     EpochMetrics out;
     out.train_loss = static_cast<float>(global_loss_acc_steps[0] / global_loss_acc_steps[2]);
     out.train_acc = static_cast<float>(global_loss_acc_steps[1] / global_loss_acc_steps[2]);
+    out.epoch_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    // Distributed val eval (outside training timer).
+    // Each rank evaluates its contiguous slice; tail samples are dropped.
+    const int val_per_rank = val.features.rows / world_size;
+    const int val_start = rank * val_per_rank;
+    double val_loss_sum = 0.0;
+    double val_correct_sum = 0.0;
+    if (val_per_rank > 0) {
+        const Matrix x_val_local = slice_rows(val.features, val_start, val_per_rank);
+        const std::vector<int> y_val_local = slice_labels(val.labels, val_start, val_per_rank);
+        const BatchMetrics local_val = model->evaluate_batch(x_val_local, y_val_local);
+        val_loss_sum = static_cast<double>(local_val.loss) * val_per_rank;
+        val_correct_sum = static_cast<double>(local_val.accuracy) * val_per_rank;
+    }
+    double val_stats[3] = {val_loss_sum, val_correct_sum, static_cast<double>(val_per_rank)};
+    double global_val_stats[3] = {0.0, 0.0, 0.0};
+    MPI_Allreduce(val_stats, global_val_stats, 3, MPI_DOUBLE, MPI_SUM, comm);
+    out.val_loss = static_cast<float>(global_val_stats[0] / global_val_stats[2]);
+    out.val_acc = static_cast<float>(global_val_stats[1] / global_val_stats[2]);
 
     if (rank == 0) {
-        const BatchMetrics val_metrics = model->evaluate_batch(val.features, val.labels);
-        out.val_loss = val_metrics.loss;
-        out.val_acc = val_metrics.accuracy;
+        const double compute_ms = total_compute_s * 1e3;
+        const double allreduce_ms = total_allreduce_s * 1e3;
+        const double other_ms = out.epoch_time_ms - compute_ms - allreduce_ms;
+        std::cout << "[mpi-dp][timing] "
+                  << "compute_ms=" << compute_ms
+                  << " allreduce_ms=" << allreduce_ms
+                  << " other_ms=" << other_ms
+                  << std::endl;
     }
-    float val_metrics_buf[2] = {out.val_loss, out.val_acc};
-    MPI_Bcast(val_metrics_buf, 2, MPI_FLOAT, 0, comm);
-    out.val_loss = val_metrics_buf[0];
-    out.val_acc = val_metrics_buf[1];
-
-    MPI_Barrier(comm);
-    const auto end = std::chrono::high_resolution_clock::now();
-    out.epoch_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     return out;
 }
 

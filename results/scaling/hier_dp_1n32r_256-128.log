@@ -1,0 +1,22 @@
+[mpi_dp_hierarchial] world_size=32 node_count=1 local_size_min=32 local_size_max=32
+[mpi-dp-hierarchial][timing] compute_ms=612.071 intra_reduce_ms=83.9843 inter_allreduce_ms=0 intra_bcast_ms=114.953 other_ms=320.992
+[mpi-dp-hierarchial] epoch 1/10 time_ms=1132 train_loss=1.83087 train_acc=0.502034 val_loss=1.28878 val_acc=0.753105
+[mpi-dp-hierarchial][timing] compute_ms=613.354 intra_reduce_ms=76.0185 inter_allreduce_ms=0 intra_bcast_ms=114.39 other_ms=321.237
+[mpi-dp-hierarchial] epoch 2/10 time_ms=1125 train_loss=0.980642 train_acc=0.797852 val_loss=0.726996 val_acc=0.835136
+[mpi-dp-hierarchial][timing] compute_ms=609.469 intra_reduce_ms=79.0346 inter_allreduce_ms=0 intra_bcast_ms=109.898 other_ms=319.598
+[mpi-dp-hierarchial] epoch 3/10 time_ms=1118 train_loss=0.644226 train_acc=0.84729 val_loss=0.541954 val_acc=0.866086
+[mpi-dp-hierarchial][timing] compute_ms=606.644 intra_reduce_ms=82.7331 inter_allreduce_ms=0 intra_bcast_ms=112.551 other_ms=319.072
+[mpi-dp-hierarchial] epoch 4/10 time_ms=1121 train_loss=0.517545 train_acc=0.868876 val_loss=0.457795 val_acc=0.882612
+[mpi-dp-hierarchial][timing] compute_ms=609.154 intra_reduce_ms=77.9012 inter_allreduce_ms=0 intra_bcast_ms=111.539 other_ms=320.405
+[mpi-dp-hierarchial] epoch 5/10 time_ms=1119 train_loss=0.451897 train_acc=0.881917 val_loss=0.409489 val_acc=0.892728
+[mpi-dp-hierarchial][timing] compute_ms=608.466 intra_reduce_ms=84.4875 inter_allreduce_ms=0 intra_bcast_ms=111.574 other_ms=319.473
+[mpi-dp-hierarchial] epoch 6/10 time_ms=1124 train_loss=0.411653 train_acc=0.890503 val_loss=0.378251 val_acc=0.900541
+[mpi-dp-hierarchial][timing] compute_ms=605.242 intra_reduce_ms=85.0083 inter_allreduce_ms=0 intra_bcast_ms=111.101 other_ms=318.649
+[mpi-dp-hierarchial] epoch 7/10 time_ms=1120 train_loss=0.383866 train_acc=0.897074 val_loss=0.355708 val_acc=0.904848
+[mpi-dp-hierarchial][timing] compute_ms=607.984 intra_reduce_ms=81.0364 inter_allreduce_ms=0 intra_bcast_ms=112.711 other_ms=320.269
+[mpi-dp-hierarchial] epoch 8/10 time_ms=1122 train_loss=0.361723 train_acc=0.901286 val_loss=0.338441 val_acc=0.908454
+[mpi-dp-hierarchial][timing] compute_ms=611.336 intra_reduce_ms=79.2253 inter_allreduce_ms=0 intra_bcast_ms=111.446 other_ms=321.992
+[mpi-dp-hierarchial] epoch 9/10 time_ms=1124 train_loss=0.344985 train_acc=0.904907 val_loss=0.325346 val_acc=0.911058
+[mpi-dp-hierarchial][timing] compute_ms=610.911 intra_reduce_ms=77.0634 inter_allreduce_ms=0 intra_bcast_ms=111.675 other_ms=320.35
+[mpi-dp-hierarchial] epoch 10/10 time_ms=1120 train_loss=0.331492 train_acc=0.908549 val_loss=0.313329 val_acc=0.913061
+Training finished (mpi-dp-hierarchial). Metrics written to /global/homes/a/ap2568/nn_training/results/scaling/hier_dp_1n32r_256-128.csv

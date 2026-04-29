@@ -488,10 +488,11 @@ EpochMetrics run_mp_epoch(
         throw std::runtime_error("No training steps executed; check batch_size and dataset size");
     }
 
-    const ValResult vr = run_mp_eval(slice, val, config.batch_size, rank, world_size, comm);
-
+    // Stop clock here — epoch_time_ms is training only, val eval excluded.
     MPI_Barrier(comm);
     const auto t1 = std::chrono::high_resolution_clock::now();
+
+    const ValResult vr = run_mp_eval(slice, val, config.batch_size, rank, world_size, comm);
 
     EpochMetrics out;
     out.train_loss = sum_loss / static_cast<float>(steps);
