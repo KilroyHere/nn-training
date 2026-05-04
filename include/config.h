@@ -14,6 +14,7 @@ struct TrainConfig {
     int train_samples = 4096;
     int val_samples = 512;
     int batch_size = 64;
+    int microbatch_count = 4;
     int epochs = 5;
     float learning_rate = 0.02f;
     unsigned int seed = 42;

@@ -4,14 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 RESULT_DIR="${ROOT_DIR}/results"
-OUT_CSV="${OUT_CSV:-${RESULT_DIR}/mpi_mp_perf_metrics.csv}"
-MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_mp_train}"
+OUT_CSV="${OUT_CSV:-${RESULT_DIR}/mpi_mp_pip_perf_metrics.csv}"
+MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_mp_pip_train}"
 MP_NODES="${MP_NODES:-4}"
 MP_TASKS_PER_NODE="${MP_TASKS_PER_NODE:-2}"
 MP_CPUS_PER_TASK="${MP_CPUS_PER_TASK:-1}"
 
 EPOCHS="${EPOCHS:-2}"
 BATCH_SIZE="${BATCH_SIZE:-4096}"
+MICROBATCHES="${MICROBATCHES:-32}"
 TRAIN_SAMPLES="${TRAIN_SAMPLES:-50000}"
 VAL_SAMPLES="${VAL_SAMPLES:-10000}"
 LEARNING_RATE="${LEARNING_RATE:-0.06}"
@@ -27,7 +28,7 @@ mkdir -p "${RESULT_DIR}"
 bash "${ROOT_DIR}/scripts/prepare_mnist.sh"
 
 if [[ ! -x "${MPI_BIN}" ]]; then
-  echo "Missing MPI MP binary: ${MPI_BIN}" >&2
+  echo "Missing MPI pipeline binary: ${MPI_BIN}" >&2
   echo "Build first with: bash ${ROOT_DIR}/scripts/build.sh" >&2
   exit 1
 fi
@@ -55,10 +56,10 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   fi
 fi
 
-echo "MPI MP perf launch config:"
+echo "MPI Pipeline Model-Parallel perf launch config:"
 echo "  allocation: job_id=${SLURM_JOB_ID:-none} nodes=${SLURM_JOB_NUM_NODES:-unknown} ntasks=${SLURM_NTASKS:-unknown}"
 echo "  srun args:  nodes=${MP_NODES} ntasks=${MP_NTASKS} tasks_per_node=${MP_TASKS_PER_NODE} cpus_per_task=${MP_CPUS_PER_TASK}"
-echo "  train args: epochs=${EPOCHS} batch_size=${BATCH_SIZE} train_samples=${TRAIN_SAMPLES} val_samples=${VAL_SAMPLES}"
+echo "  train args: epochs=${EPOCHS} batch_size=${BATCH_SIZE} microbatches=${MICROBATCHES} train_samples=${TRAIN_SAMPLES} val_samples=${VAL_SAMPLES}"
 
 srun \
   --nodes "${MP_NODES}" \
@@ -68,6 +69,7 @@ srun \
   "${MPI_BIN}" \
   --epochs "${EPOCHS}" \
   --batch "${BATCH_SIZE}" \
+  --microbatches "${MICROBATCHES}" \
   --train-samples "${TRAIN_SAMPLES}" \
   --val-samples "${VAL_SAMPLES}" \
   --lr "${LEARNING_RATE}" \
@@ -96,7 +98,7 @@ avg_epoch_ms = mean(epoch_ms)
 avg_epoch_s = avg_epoch_ms / 1000.0
 samples_per_sec = train_samples / avg_epoch_s if avg_epoch_s > 0 else 0.0
 
-print(f"MPI MP performance run complete: {csv_path}")
+print(f"MPI Pipeline Model-Parallel performance run complete: {csv_path}")
 print(f"Epochs: {len(rows)}")
 print(f"Average epoch time: {avg_epoch_ms:.2f} ms")
 print(f"Min/Max epoch time: {min(epoch_ms):.2f}/{max(epoch_ms):.2f} ms")

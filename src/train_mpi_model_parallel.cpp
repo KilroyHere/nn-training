@@ -278,23 +278,23 @@ MPI_Request irecv_data(float* buf, int count, int src, int tag, MPI_Comm comm) {
     return req;
 }
 
-void gather_batch(
-    const Dataset& ds,
-    const std::vector<int>& epoch_indices,
-    int pos,
-    int batch_size,
-    Matrix* x_out,
-    std::vector<int>* y_out) {
-    *x_out = Matrix(batch_size, ds.features.cols, 0.0f);
-    y_out->resize(static_cast<size_t>(batch_size));
-    for (int i = 0; i < batch_size; ++i) {
-        const int src = epoch_indices[static_cast<size_t>(pos + i)];
-        for (int j = 0; j < ds.features.cols; ++j) {
-            x_out->at(i, j) = ds.features.at(src, j);
-        }
-        (*y_out)[static_cast<size_t>(i)] = ds.labels[static_cast<size_t>(src)];
-    }
-}
+// void gather_batch(
+//     const Dataset& ds,
+//     const std::vector<int>& epoch_indices,
+//     int pos,
+//     int batch_size,
+//     Matrix* x_out,
+//     std::vector<int>* y_out) {
+//     *x_out = Matrix(batch_size, ds.features.cols, 0.0f);
+//     y_out->resize(static_cast<size_t>(batch_size));
+//     for (int i = 0; i < batch_size; ++i) {
+//         const int src = epoch_indices[static_cast<size_t>(pos + i)];
+//         for (int j = 0; j < ds.features.cols; ++j) {
+//             x_out->at(i, j) = ds.features.at(src, j);
+//         }
+//         (*y_out)[static_cast<size_t>(i)] = ds.labels[static_cast<size_t>(src)];
+//     }
+// }
 
 struct StepResult {
     float train_loss;

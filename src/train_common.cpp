@@ -30,6 +30,12 @@ void validate_train_config(const TrainConfig& config) {
     if (config.batch_size <= 0 || config.epochs <= 0 || config.learning_rate <= 0.0f) {
         throw std::invalid_argument("batch_size, epochs, and learning_rate must be positive");
     }
+    if (config.microbatch_count <= 0) {
+        throw std::invalid_argument("microbatch_count must be positive");
+    }
+    if (config.batch_size % config.microbatch_count != 0) {
+        throw std::invalid_argument("batch_size must be divisible by microbatch_count");
+    }
     if (config.train_samples <= 0 || config.val_samples <= 0) {
         throw std::invalid_argument("train_samples and val_samples must be positive");
     }
@@ -123,6 +129,23 @@ bool ensure_parent_dir(const std::string& file_path) {
         pos = next + 1;
     }
     return true;
+}
+
+void gather_batch(const Dataset& ds,
+                  const std::vector<int>& epoch_indices,
+                  int pos,
+                  int batch_size,
+                  Matrix* x_out,
+                  std::vector<int>* y_out) {
+    *x_out = Matrix(batch_size, ds.features.cols, 0.0f);
+    y_out->resize(static_cast<size_t>(batch_size));
+    for (int i = 0; i < batch_size; ++i) {
+        const int src = epoch_indices[static_cast<size_t>(pos + i)];
+        for (int j = 0; j < ds.features.cols; ++j) {
+            x_out->at(i, j) = ds.features.at(src, j);
+        }
+        (*y_out)[static_cast<size_t>(i)] = ds.labels[static_cast<size_t>(src)];
+    }
 }
 
 }  // namespace nn

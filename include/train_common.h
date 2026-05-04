@@ -32,6 +32,13 @@ std::string hidden_layers_csv(const std::vector<int>& hidden_layers);
 
 bool ensure_parent_dir(const std::string& file_path);
 
+void gather_batch(const Dataset& ds,
+                  const std::vector<int>& epoch_indices,
+                  int pos,
+                  int batch_size,
+                  Matrix* x_out,
+                  std::vector<int>* y_out);
+
 }  // namespace nn
 
 #endif  // NN_TRAINING_TRAIN_COMMON_H_

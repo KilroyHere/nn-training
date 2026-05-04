@@ -38,6 +38,7 @@ void print_train_usage() {
               << "Options:\n"
               << "  --epochs <int>\n"
               << "  --batch <int>\n"
+              << "  --microbatches <int>\n"
               << "  --lr <float>\n"
               << "  --seed <int>\n"
               << "  --train-samples <int>\n"
@@ -74,6 +75,8 @@ CliParseResult parse_train_args(
                 config->epochs = std::stoi(value);
             } else if (arg == "--batch" && consume_value(&value)) {
                 config->batch_size = std::stoi(value);
+            } else if (arg == "--microbatches" && consume_value(&value)) {
+                config->microbatch_count = std::stoi(value);
             } else if (arg == "--lr" && consume_value(&value)) {
                 config->learning_rate = std::stof(value);
             } else if (arg == "--seed" && consume_value(&value)) {
