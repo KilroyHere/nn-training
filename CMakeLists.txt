@@ -45,3 +45,9 @@ target_link_libraries(mpi_dp_hierarchial_train PRIVATE nn_core MPI::MPI_CXX)
 
 add_executable(mpi_mp_train src/main_mpi_mp.cpp src/train_mpi_model_parallel.cpp)
 target_link_libraries(mpi_mp_train PRIVATE nn_core MPI::MPI_CXX)
+
+add_executable(
+    mpi_dp_local_sgd_train
+    src/main_mpi_dp_local_sgd.cpp
+    src/train_mpi_dp_local_sgd.cpp)
+target_link_libraries(mpi_dp_local_sgd_train PRIVATE nn_core MPI::MPI_CXX)

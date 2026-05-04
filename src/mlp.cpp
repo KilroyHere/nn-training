@@ -217,6 +217,35 @@ void MLP::apply_gradients(const GradientBuffers& gradients, float learning_rate)
     }
 }
 
+size_t MLP::weight_buffer_size() const {
+    size_t total = 0;
+    for (const Layer& l : layers_) {
+        total += l.weights.data.size();
+        total += l.bias.size();
+    }
+    return total;
+}
+
+void MLP::pack_weights(float* buf) const {
+    size_t offset = 0;
+    for (const Layer& l : layers_) {
+        std::copy(l.weights.data.begin(), l.weights.data.end(), buf + offset);
+        offset += l.weights.data.size();
+        std::copy(l.bias.begin(), l.bias.end(), buf + offset);
+        offset += l.bias.size();
+    }
+}
+
+void MLP::unpack_weights(const float* buf) {
+    size_t offset = 0;
+    for (Layer& l : layers_) {
+        std::copy(buf + offset, buf + offset + l.weights.data.size(), l.weights.data.begin());
+        offset += l.weights.data.size();
+        std::copy(buf + offset, buf + offset + l.bias.size(), l.bias.begin());
+        offset += l.bias.size();
+    }
+}
+
 // Convenience serial path: compute gradients and apply immediately.
 BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float learning_rate) {
     GradientBuffers gradients;

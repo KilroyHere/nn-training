@@ -24,6 +24,10 @@ struct TrainConfig {
     std::string mnist_test_labels = "data/mnist/t10k-labels-idx1-ubyte";
 
     std::string output_csv = "results/metrics.csv";
+
+    // Local SGD: number of local gradient steps between weight-averaging syncs.
+    // 1 = sync every step (equivalent to flat DP), >1 = local SGD.
+    int sync_every = 1;
 };
 
 }  // namespace nn

@@ -1,0 +1,18 @@
+MNIST files ready in /global/homes/a/ap2568/nn_training/data/mnist
+[serial] epoch 1/10 time_ms=9790 train_loss=1.86302 train_acc=0.452596 val_loss=1.28544 val_acc=0.7084
+[serial] epoch 2/10 time_ms=9720 train_loss=0.91984 train_acc=0.790487 val_loss=0.635165 val_acc=0.8469
+[serial] epoch 3/10 time_ms=9712 train_loss=0.567131 train_acc=0.854329 val_loss=0.467467 val_acc=0.8753
+[serial] epoch 4/10 time_ms=9693 train_loss=0.453531 train_acc=0.876709 val_loss=0.396375 val_acc=0.893
+[serial] epoch 5/10 time_ms=9687 train_loss=0.396443 train_acc=0.88973 val_loss=0.355504 val_acc=0.9016
+[serial] epoch 6/10 time_ms=9705 train_loss=0.360365 train_acc=0.898783 val_loss=0.33087 val_acc=0.908
+[serial] epoch 7/10 time_ms=9684 train_loss=0.335634 train_acc=0.905599 val_loss=0.310517 val_acc=0.9127
+[serial] epoch 8/10 time_ms=9689 train_loss=0.31652 train_acc=0.910258 val_loss=0.294355 val_acc=0.9164
+[serial] epoch 9/10 time_ms=9691 train_loss=0.300708 train_acc=0.91449 val_loss=0.281531 val_acc=0.9203
+[serial] epoch 10/10 time_ms=9683 train_loss=0.286857 train_acc=0.918579 val_loss=0.272026 val_acc=0.9226
+Training finished (serial). Metrics written to results/scaling/serial_256-128-64.csv
+Performance run complete: results/scaling/serial_256-128-64.csv
+Epochs: 10
+Average epoch time: 9705.40 ms
+Min/Max epoch time: 9683.00/9790.00 ms
+Approx throughput: 5151.77 samples/sec
+Final metrics: train_loss=0.286857, train_acc=0.918579, val_loss=0.272026, val_acc=0.922600

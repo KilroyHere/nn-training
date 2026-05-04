@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 RESULT_DIR="${ROOT_DIR}/results"
-OUT_CSV="${OUT_CSV:-${RESULT_DIR}/mpi_dp_hierarchial_perf_metrics.csv}"
-MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_dp_hierarchial_train}"
+OUT_CSV="${OUT_CSV:-${RESULT_DIR}/mpi_dp_local_sgd_perf_metrics.csv}"
+MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_dp_local_sgd_train}"
 DP_NODES="${DP_NODES:-4}"
 DP_TASKS_PER_NODE="${DP_TASKS_PER_NODE:-32}"
 DP_CPUS_PER_TASK="${DP_CPUS_PER_TASK:-1}"
@@ -17,6 +17,7 @@ VAL_SAMPLES="${VAL_SAMPLES:-10000}"
 LEARNING_RATE="${LEARNING_RATE:-0.03}"
 SEED="${SEED:-42}"
 HIDDEN="${HIDDEN:-512-256}"
+SYNC_EVERY="${SYNC_EVERY:-10}"
 DATA_DIR="${DATA_DIR:-${ROOT_DIR}/data/mnist}"
 
 export OMP_NUM_THREADS=1
@@ -27,7 +28,7 @@ mkdir -p "${RESULT_DIR}"
 bash "${ROOT_DIR}/scripts/prepare_mnist.sh"
 
 if [[ ! -x "${MPI_BIN}" ]]; then
-  echo "Missing MPI DP hierarchial binary: ${MPI_BIN}" >&2
+  echo "Missing Local SGD binary: ${MPI_BIN}" >&2
   echo "Build first with: bash ${ROOT_DIR}/scripts/build.sh" >&2
   exit 1
 fi
@@ -55,10 +56,10 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   fi
 fi
 
-echo "MPI DP hierarchial perf launch config:"
+echo "MPI DP local SGD perf launch config:"
 echo "  allocation: job_id=${SLURM_JOB_ID:-none} nodes=${SLURM_JOB_NUM_NODES:-unknown} ntasks=${SLURM_NTASKS:-unknown}"
 echo "  srun args:  nodes=${DP_NODES} ntasks=${DP_NTASKS} tasks_per_node=${DP_TASKS_PER_NODE} cpus_per_task=${DP_CPUS_PER_TASK}"
-echo "  train args: epochs=${EPOCHS} global_batch=${GLOBAL_BATCH} train_samples=${TRAIN_SAMPLES} val_samples=${VAL_SAMPLES}"
+echo "  train args: epochs=${EPOCHS} global_batch=${GLOBAL_BATCH} train_samples=${TRAIN_SAMPLES} val_samples=${VAL_SAMPLES} sync_every=${SYNC_EVERY}"
 
 srun \
   --nodes "${DP_NODES}" \
@@ -73,6 +74,7 @@ srun \
   --lr "${LEARNING_RATE}" \
   --seed "${SEED}" \
   --hidden "${HIDDEN}" \
+  --sync-every "${SYNC_EVERY}" \
   --data-dir "${DATA_DIR}" \
   --output "${OUT_CSV}"
 
@@ -96,7 +98,7 @@ avg_epoch_ms = mean(epoch_ms)
 avg_epoch_s = avg_epoch_ms / 1000.0
 samples_per_sec = train_samples / avg_epoch_s if avg_epoch_s > 0 else 0.0
 
-print(f"MPI DP hierarchial performance run complete: {csv_path}")
+print(f"MPI DP local SGD performance run complete: {csv_path}")
 print(f"Epochs: {len(rows)}")
 print(f"Average epoch time: {avg_epoch_ms:.2f} ms")
 print(f"Min/Max epoch time: {min(epoch_ms):.2f}/{max(epoch_ms):.2f} ms")

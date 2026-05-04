@@ -136,9 +136,11 @@ void destroy_hierarchical_comms(HierarchicalComms* comms) {
     }
 }
 
-// Hierarchically reduces gradients across all ranks per layer, then averages.
-// Phase order per layer: intra-node Reduce → inter-node Allreduce (leaders only) → intra-node Bcast.
-// Timings accumulated into the provided HierarchicalTimings struct.
+// Hierarchically reduces gradients across all ranks using fused buffers, then averages.
+// All weight and bias gradients are packed into one flat buffer so the three collective
+// phases (intra Reduce → inter Allreduce → intra Bcast) each issue a single MPI call
+// regardless of layer count, minimising per-call latency and enabling larger-message
+// algorithms in the MPI runtime.
 void allreduce_gradients_hierarchial(
     GradientBuffers* gradients,
     const HierarchicalComms& comms,
@@ -147,74 +149,72 @@ void allreduce_gradients_hierarchial(
         throw std::invalid_argument("allreduce_gradients_hierarchial requires non-null gradients");
     }
 
+    // Compute total gradient element count and pack into one contiguous buffer.
+    size_t total = 0;
     for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
-        Matrix& grad_w = gradients->weight_grads[i];
-        std::vector<float>& grad_b = gradients->bias_grads[i];
-        const int w_count = static_cast<int>(grad_w.data.size());
-        const int b_count = static_cast<int>(grad_b.size());
+        total += gradients->weight_grads[i].data.size();
+        total += gradients->bias_grads[i].size();
+    }
+    std::vector<float> buf(total);
+    size_t offset = 0;
+    for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
+        std::copy(gradients->weight_grads[i].data.begin(),
+                  gradients->weight_grads[i].data.end(),
+                  buf.begin() + static_cast<std::ptrdiff_t>(offset));
+        offset += gradients->weight_grads[i].data.size();
+        std::copy(gradients->bias_grads[i].begin(),
+                  gradients->bias_grads[i].end(),
+                  buf.begin() + static_cast<std::ptrdiff_t>(offset));
+        offset += gradients->bias_grads[i].size();
+    }
+    const int count = static_cast<int>(total);
 
-        // Phase 1: intra-node Reduce to local root (rank 0 within node).
-        double t0 = MPI_Wtime();
-        MPI_Reduce(
-            comms.is_leader ? MPI_IN_PLACE : grad_w.data.data(),
-            grad_w.data.data(),
-            w_count,
+    // Phase 1: one intra-node Reduce to local root (rank 0 within node).
+    double t0 = MPI_Wtime();
+    MPI_Reduce(
+        comms.is_leader ? MPI_IN_PLACE : buf.data(),
+        buf.data(),
+        count,
+        MPI_FLOAT,
+        MPI_SUM,
+        0,
+        comms.intra_node_comm);
+    if (timings != nullptr) {
+        timings->intra_reduce_s += MPI_Wtime() - t0;
+    }
+
+    // Phase 2: one inter-node Allreduce among node leaders only.
+    // Skipped when there is only one node (inter_size == 1).
+    if (comms.is_leader && comms.inter_size > 1) {
+        double t1 = MPI_Wtime();
+        MPI_Allreduce(
+            MPI_IN_PLACE,
+            buf.data(),
+            count,
             MPI_FLOAT,
             MPI_SUM,
-            0,
-            comms.intra_node_comm);
-        MPI_Reduce(
-            comms.is_leader ? MPI_IN_PLACE : grad_b.data(),
-            grad_b.data(),
-            b_count,
-            MPI_FLOAT,
-            MPI_SUM,
-            0,
-            comms.intra_node_comm);
+            comms.inter_node_comm);
         if (timings != nullptr) {
-            timings->intra_reduce_s += MPI_Wtime() - t0;
-        }
-
-        // Phase 2: inter-node Allreduce among node leaders only.
-        // Skipped when there is only one node (inter_size == 1).
-        if (comms.is_leader && comms.inter_size > 1) {
-            double t1 = MPI_Wtime();
-            MPI_Allreduce(
-                MPI_IN_PLACE,
-                grad_w.data.data(),
-                w_count,
-                MPI_FLOAT,
-                MPI_SUM,
-                comms.inter_node_comm);
-            MPI_Allreduce(
-                MPI_IN_PLACE,
-                grad_b.data(),
-                b_count,
-                MPI_FLOAT,
-                MPI_SUM,
-                comms.inter_node_comm);
-            if (timings != nullptr) {
-                timings->inter_allreduce_s += MPI_Wtime() - t1;
-            }
-        }
-
-        // Phase 3: intra-node Bcast from local root to all ranks on node.
-        double t2 = MPI_Wtime();
-        MPI_Bcast(grad_w.data.data(), w_count, MPI_FLOAT, 0, comms.intra_node_comm);
-        MPI_Bcast(grad_b.data(), b_count, MPI_FLOAT, 0, comms.intra_node_comm);
-        if (timings != nullptr) {
-            timings->intra_bcast_s += MPI_Wtime() - t2;
+            timings->inter_allreduce_s += MPI_Wtime() - t1;
         }
     }
 
-    // Convert sums to global means.
+    // Phase 3: one intra-node Bcast from local root to all ranks on node.
+    double t2 = MPI_Wtime();
+    MPI_Bcast(buf.data(), count, MPI_FLOAT, 0, comms.intra_node_comm);
+    if (timings != nullptr) {
+        timings->intra_bcast_s += MPI_Wtime() - t2;
+    }
+
+    // Unpack fused buffer back into per-layer gradient tensors, scaling to global mean.
     const float inv_world = 1.0f / static_cast<float>(comms.world_size);
+    offset = 0;
     for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
         for (float& v : gradients->weight_grads[i].data) {
-            v *= inv_world;
+            v = buf[offset++] * inv_world;
         }
         for (float& v : gradients->bias_grads[i]) {
-            v *= inv_world;
+            v = buf[offset++] * inv_world;
         }
     }
 }

@@ -1,0 +1,22 @@
+[mpi-dp-local-sgd] world_size=16 sync_every=10 weight_params=242762
+[mpi-dp-local-sgd][timing] compute_ms=1204.8 sync_ms=13.1039 syncs_per_epoch=5 other_ms=59.0929
+[mpi-dp-local-sgd] epoch 1/10 time_ms=1277 train_loss=1.87036 train_acc=0.446045 val_loss=1.29505 val_acc=0.7056
+[mpi-dp-local-sgd][timing] compute_ms=1203.79 sync_ms=10.2592 syncs_per_epoch=5 other_ms=59.952
+[mpi-dp-local-sgd] epoch 2/10 time_ms=1274 train_loss=0.942536 train_acc=0.776265 val_loss=0.642738 val_acc=0.8441
+[mpi-dp-local-sgd][timing] compute_ms=1203.54 sync_ms=10.9092 syncs_per_epoch=5 other_ms=59.5502
+[mpi-dp-local-sgd] epoch 3/10 time_ms=1274 train_loss=0.590327 train_acc=0.843486 val_loss=0.471895 val_acc=0.8771
+[mpi-dp-local-sgd][timing] compute_ms=1200.84 sync_ms=12.2402 syncs_per_epoch=5 other_ms=58.9188
+[mpi-dp-local-sgd] epoch 4/10 time_ms=1272 train_loss=0.476526 train_acc=0.867452 val_loss=0.398894 val_acc=0.8938
+[mpi-dp-local-sgd][timing] compute_ms=1201.5 sync_ms=12.0954 syncs_per_epoch=5 other_ms=59.405
+[mpi-dp-local-sgd] epoch 5/10 time_ms=1273 train_loss=0.418546 train_acc=0.881226 val_loss=0.357167 val_acc=0.9012
+[mpi-dp-local-sgd][timing] compute_ms=1201.03 sync_ms=10.6377 syncs_per_epoch=5 other_ms=60.3315
+[mpi-dp-local-sgd] epoch 6/10 time_ms=1272 train_loss=0.379642 train_acc=0.891134 val_loss=0.330801 val_acc=0.9069
+[mpi-dp-local-sgd][timing] compute_ms=1200.59 sync_ms=11.2146 syncs_per_epoch=5 other_ms=60.198
+[mpi-dp-local-sgd] epoch 7/10 time_ms=1272 train_loss=0.353436 train_acc=0.89919 val_loss=0.310439 val_acc=0.9127
+[mpi-dp-local-sgd][timing] compute_ms=1201.78 sync_ms=10.6541 syncs_per_epoch=5 other_ms=59.5618
+[mpi-dp-local-sgd] epoch 8/10 time_ms=1272 train_loss=0.335375 train_acc=0.902018 val_loss=0.295058 val_acc=0.9167
+[mpi-dp-local-sgd][timing] compute_ms=1201.95 sync_ms=11.2393 syncs_per_epoch=5 other_ms=59.8088
+[mpi-dp-local-sgd] epoch 9/10 time_ms=1273 train_loss=0.317874 train_acc=0.907898 val_loss=0.281419 val_acc=0.9205
+[mpi-dp-local-sgd][timing] compute_ms=1201.32 sync_ms=11.4355 syncs_per_epoch=5 other_ms=59.244
+[mpi-dp-local-sgd] epoch 10/10 time_ms=1272 train_loss=0.303219 train_acc=0.912231 val_loss=0.271522 val_acc=0.9216
+Training finished (mpi-dp-local-sgd). Metrics written to /global/homes/a/ap2568/nn_training/results/scaling/local_sgd_K10_1n16r_256-128-64.csv
