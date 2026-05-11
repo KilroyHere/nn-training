@@ -360,31 +360,31 @@ MPI_Request irecv_data(float* buf, int count, int src, int tag, MPI_Comm comm) {
     return req;
 }
 
-void gather_batch(
-    const Dataset& ds,
-    const std::vector<int>& epoch_indices,
-    int pos,
-    int batch_size,
-    Matrix* x_out,
-    std::vector<int>* y_out) {
-    if (x_out == nullptr || y_out == nullptr) {
-        throw std::invalid_argument("gather_batch requires non-null outputs");
-    }
-    if (x_out->rows != batch_size || x_out->cols != ds.features.cols) {
-        throw std::invalid_argument("gather_batch output matrix shape mismatch");
-    }
-    y_out->resize(static_cast<size_t>(batch_size));
-    for (int i = 0; i < batch_size; ++i) {
-        const int src = epoch_indices[static_cast<size_t>(pos + i)];
-        const size_t dst_row = static_cast<size_t>(i) * static_cast<size_t>(x_out->cols);
-        const size_t src_row = static_cast<size_t>(src) * static_cast<size_t>(ds.features.cols);
-        for (int j = 0; j < ds.features.cols; ++j) {
-            x_out->data[dst_row + static_cast<size_t>(j)] =
-                ds.features.data[src_row + static_cast<size_t>(j)];
-        }
-        (*y_out)[static_cast<size_t>(i)] = ds.labels[static_cast<size_t>(src)];
-    }
-}
+// void gather_batch(
+//     const Dataset& ds,
+//     const std::vector<int>& epoch_indices,
+//     int pos,
+//     int batch_size,
+//     Matrix* x_out,
+//     std::vector<int>* y_out) {
+//     if (x_out == nullptr || y_out == nullptr) {
+//         throw std::invalid_argument("gather_batch requires non-null outputs");
+//     }
+//     if (x_out->rows != batch_size || x_out->cols != ds.features.cols) {
+//         throw std::invalid_argument("gather_batch output matrix shape mismatch");
+//     }
+//     y_out->resize(static_cast<size_t>(batch_size));
+//     for (int i = 0; i < batch_size; ++i) {
+//         const int src = epoch_indices[static_cast<size_t>(pos + i)];
+//         const size_t dst_row = static_cast<size_t>(i) * static_cast<size_t>(x_out->cols);
+//         const size_t src_row = static_cast<size_t>(src) * static_cast<size_t>(ds.features.cols);
+//         for (int j = 0; j < ds.features.cols; ++j) {
+//             x_out->data[dst_row + static_cast<size_t>(j)] =
+//                 ds.features.data[src_row + static_cast<size_t>(j)];
+//         }
+//         (*y_out)[static_cast<size_t>(i)] = ds.labels[static_cast<size_t>(src)];
+//     }
+// }
 
 struct StepResult {
     float train_loss;
