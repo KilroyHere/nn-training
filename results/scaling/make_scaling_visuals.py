@@ -72,6 +72,7 @@ TRADEOFF = [
     ("Local SGD K=10\n(128 ranks)", 264, 0.9191),
     ("Local SGD K=50\n(128 ranks)", 233, 0.9173),
 ]
+SERIAL_EPOCH_MS = TRADEOFF[0][1]
 SPEEDUP_VS_SERIAL = {
     "flat_su": [1.94,  6.24,  9.69, 13.00, 16.28],
     "hier_su": [1.90,  5.66,  7.78, 10.28, 11.89],
@@ -531,6 +532,86 @@ def plot_speedup_vs_serial(out_dir):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Fig 7 – Epoch Time vs Cluster Size (with Serial Baseline)
+# ══════════════════════════════════════════════════════════════════════════
+def plot_time_vs_cluster_with_serial(out_dir):
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ranks = SPEEDUP["ranks"]
+
+    series = [
+        ("Flat DP",        EPOCH_MS["flat"], "o"),
+        ("Hier DP",        EPOCH_MS["hier"], "s"),
+        ("Local SGD K=10", EPOCH_MS["k10"],  "^"),
+        ("Local SGD K=50", EPOCH_MS["k50"],  "D"),
+    ]
+    for name, values, marker in series:
+        color = PALETTE[name]
+        ax.plot(
+            ranks,
+            values,
+            marker=marker,
+            markersize=6.5,
+            linewidth=2,
+            color=color,
+            label=name,
+            markerfacecolor="white",
+            markeredgewidth=2,
+            markeredgecolor=color,
+            zorder=3,
+        )
+
+    # Ideal strong-scaling time curve anchored at flat DP time for 4 ranks.
+    base_ranks = ranks[0]
+    base_flat_time = EPOCH_MS["flat"][0]
+    ideal_time = [base_flat_time * (base_ranks / r) for r in ranks]
+    ax.plot(
+        ranks,
+        ideal_time,
+        "--",
+        color=PALETTE["Ideal"],
+        linewidth=1.5,
+        label=f"Ideal linear (from {base_flat_time:,} ms at {base_ranks} ranks)",
+        zorder=2,
+    )
+
+    ax.axhline(
+        SERIAL_EPOCH_MS,
+        color=PALETTE["serial"],
+        linestyle="--",
+        linewidth=1.6,
+        label=f"Serial baseline ({SERIAL_EPOCH_MS:,} ms/epoch)",
+        zorder=2,
+    )
+
+    ax.set_xscale("log", base=2)
+    ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
+    ax.set_xticks(ranks)
+    ax.set_xticklabels(CONFIG_LABELS_SHORT)
+    ax.set_yscale("log")
+    ax.set_yticks([200, 500, 1000, 2000, 5000, 10000])
+    ax.yaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda v, _: f"{int(v):,}" if v >= 1000 else f"{int(v)}")
+    )
+    ax.set_xlabel("Cluster size  (total MPI ranks, log₂ scale)")
+    ax.set_ylabel("Average epoch time  (ms, log scale; lower is better)")
+    ax.set_title("")
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=3, frameon=True, borderaxespad=0.0)
+
+    fig.text(
+        0.01,
+        -0.02,
+        "N = nodes,  R = MPI ranks  (e.g. 2N·64R = 2 nodes × 32 ranks each)",
+        fontsize=8.5,
+        color="#6B7280",
+    )
+    fig.subplots_adjust(top=0.85, bottom=0.13)
+    p = os.path.join(out_dir, "07_time_vs_cluster_with_serial.png")
+    fig.savefig(p)
+    plt.close(fig)
+    print(f"  ✓  {p}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════════════════
 def main():
@@ -548,7 +629,8 @@ def main():
     plot_timing_breakdown(args.out_dir)
     plot_tradeoff(args.out_dir)
     plot_speedup_vs_serial(args.out_dir)
-    print("Done — 7 figures written.")
+    plot_time_vs_cluster_with_serial(args.out_dir)
+    print("Done — 8 figures written.")
 
 
 if __name__ == "__main__":

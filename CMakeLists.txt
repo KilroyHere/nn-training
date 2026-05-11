@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(nn_training LANGUAGES CXX)
 
 option(NN_FORCE_MODERN_GCC "Require GCC >= 9 for reliable C++17 support" ON)
+option(NN_ENABLE_NATIVE_TUNING "Enable -march=native in Release builds" ON)
+option(NN_ENABLE_IPO "Enable interprocedural optimization in Release builds" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +20,23 @@ endif()
 message(STATUS "Using C++ compiler: ${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION})")
 find_package(BLAS REQUIRED)
 find_package(MPI REQUIRED)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options($<$<CONFIG:Release>:-O3>)
+    if(NN_ENABLE_NATIVE_TUNING)
+        add_compile_options($<$<CONFIG:Release>:-march=native>)
+    endif()
+endif()
+
+if(NN_ENABLE_IPO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT nn_ipo_supported OUTPUT nn_ipo_error)
+    if(nn_ipo_supported)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    else()
+        message(STATUS "IPO disabled: ${nn_ipo_error}")
+    endif()
+endif()
 
 add_library(nn_core
     src/tensor.cpp

@@ -285,12 +285,20 @@ void gather_batch(
     int batch_size,
     Matrix* x_out,
     std::vector<int>* y_out) {
-    *x_out = Matrix(batch_size, ds.features.cols, 0.0f);
+    if (x_out == nullptr || y_out == nullptr) {
+        throw std::invalid_argument("gather_batch requires non-null outputs");
+    }
+    if (x_out->rows != batch_size || x_out->cols != ds.features.cols) {
+        throw std::invalid_argument("gather_batch output matrix shape mismatch");
+    }
     y_out->resize(static_cast<size_t>(batch_size));
     for (int i = 0; i < batch_size; ++i) {
         const int src = epoch_indices[static_cast<size_t>(pos + i)];
+        const size_t dst_row = static_cast<size_t>(i) * static_cast<size_t>(x_out->cols);
+        const size_t src_row = static_cast<size_t>(src) * static_cast<size_t>(ds.features.cols);
         for (int j = 0; j < ds.features.cols; ++j) {
-            x_out->at(i, j) = ds.features.at(src, j);
+            x_out->data[dst_row + static_cast<size_t>(j)] =
+                ds.features.data[src_row + static_cast<size_t>(j)];
         }
         (*y_out)[static_cast<size_t>(i)] = ds.labels[static_cast<size_t>(src)];
     }
@@ -397,13 +405,17 @@ ValResult run_mp_eval(
     float sum_loss = 0.0f;
     float sum_acc = 0.0f;
     int steps = 0;
+    Matrix x_batch(batch_size, val.features.cols, 0.0f);
+    std::vector<int> y_batch(static_cast<size_t>(batch_size));
 
     for (int pos = 0; pos + batch_size <= val.features.rows; pos += batch_size) {
-        Matrix x_batch(batch_size, val.features.cols, 0.0f);
-        std::vector<int> y_batch(static_cast<size_t>(batch_size));
         for (int i = 0; i < batch_size; ++i) {
+            const size_t dst_row = static_cast<size_t>(i) * static_cast<size_t>(x_batch.cols);
+            const size_t src_row =
+                static_cast<size_t>(pos + i) * static_cast<size_t>(val.features.cols);
             for (int j = 0; j < val.features.cols; ++j) {
-                x_batch.at(i, j) = val.features.at(pos + i, j);
+                x_batch.data[dst_row + static_cast<size_t>(j)] =
+                    val.features.data[src_row + static_cast<size_t>(j)];
             }
             y_batch[static_cast<size_t>(i)] = val.labels[static_cast<size_t>(pos + i)];
         }
@@ -464,10 +476,10 @@ EpochMetrics run_mp_epoch(
     float sum_loss = 0.0f;
     float sum_acc = 0.0f;
     int steps = 0;
+    Matrix x_batch(config.batch_size, train.features.cols, 0.0f);
+    std::vector<int> y_batch(static_cast<size_t>(config.batch_size));
 
     for (int pos = 0; pos + config.batch_size <= train.features.rows; pos += config.batch_size) {
-        Matrix x_batch;
-        std::vector<int> y_batch;
         gather_batch(train, *epoch_indices, pos, config.batch_size, &x_batch, &y_batch);
 
         const StepResult step_result = run_mp_step(

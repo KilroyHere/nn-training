@@ -39,30 +39,44 @@ struct HierarchicalTimings {
     double compute_s = 0.0;
 };
 
-// Copies selected feature rows into a contiguous batch matrix.
-Matrix gather_rows(const Matrix& m, const std::vector<int>& indices, int start, int count) {
-    Matrix out(count, m.cols, 0.0f);
+// Copies selected feature rows into a preallocated batch matrix.
+void gather_rows_inplace(
+    const Matrix& m,
+    const std::vector<int>& indices,
+    int start,
+    int count,
+    Matrix* out) {
+    if (out == nullptr) {
+        throw std::invalid_argument("gather_rows_inplace requires non-null output");
+    }
+    if (out->rows != count || out->cols != m.cols) {
+        throw std::invalid_argument("gather_rows_inplace output shape mismatch");
+    }
     for (int i = 0; i < count; ++i) {
         const int src = indices[static_cast<size_t>(start + i)];
+        const size_t dst_row = static_cast<size_t>(i) * static_cast<size_t>(out->cols);
+        const size_t src_row = static_cast<size_t>(src) * static_cast<size_t>(m.cols);
         for (int j = 0; j < m.cols; ++j) {
-            out.at(i, j) = m.at(src, j);
+            out->data[dst_row + static_cast<size_t>(j)] = m.data[src_row + static_cast<size_t>(j)];
         }
     }
-    return out;
 }
 
-// Copies selected labels into a contiguous batch vector.
-std::vector<int> gather_labels(
+// Copies selected labels into a preallocated batch vector.
+void gather_labels_inplace(
     const std::vector<int>& labels,
     const std::vector<int>& indices,
     int start,
-    int count) {
-    std::vector<int> out(static_cast<size_t>(count));
+    int count,
+    std::vector<int>* out) {
+    if (out == nullptr) {
+        throw std::invalid_argument("gather_labels_inplace requires non-null output");
+    }
+    out->resize(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i) {
-        out[static_cast<size_t>(i)] =
+        (*out)[static_cast<size_t>(i)] =
             labels[static_cast<size_t>(indices[static_cast<size_t>(start + i)])];
     }
-    return out;
 }
 
 // Returns a contiguous submatrix of rows [start, start+count).
@@ -245,13 +259,14 @@ EpochMetrics run_mpi_dp_hierarchial_epoch(
     float local_running_acc = 0.0f;
     int local_steps = 0;
     HierarchicalTimings timings;
+    Matrix x_batch(local_batch, train.features.cols, 0.0f);
+    std::vector<int> y_batch(static_cast<size_t>(local_batch));
+    GradientBuffers gradients;
     for (int pos = 0; pos + config.batch_size <= train.features.rows; pos += config.batch_size) {
         const int local_start = pos + (comms.world_rank * local_batch);
-        const Matrix x_batch = gather_rows(train.features, *epoch_indices, local_start, local_batch);
-        const std::vector<int> y_batch =
-            gather_labels(train.labels, *epoch_indices, local_start, local_batch);
+        gather_rows_inplace(train.features, *epoch_indices, local_start, local_batch, &x_batch);
+        gather_labels_inplace(train.labels, *epoch_indices, local_start, local_batch, &y_batch);
 
-        GradientBuffers gradients;
         double t_compute = MPI_Wtime();
         const BatchMetrics local_metrics = model->compute_batch_gradients(x_batch, y_batch, &gradients);
         timings.compute_s += MPI_Wtime() - t_compute;
