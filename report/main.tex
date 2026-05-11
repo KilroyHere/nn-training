@@ -68,7 +68,7 @@
 %  Title block
 % ============================================================
 \title{
-  \textbf{[Project Title]} \\[4pt]
+  \textbf{MPI Parallelization of MLP Training on MNIST} \\[4pt]
   \large Final Project Report
 }
 
@@ -88,14 +88,25 @@
 % GitHub repo — required by submission guidelines
 \begin{center}
   \textbf{GitHub Repository:}
-  \href{https://github.com/your-org/your-repo}{\texttt{github.com/your-org/your-repo}}
+  \href{https://github.com/your-org/your-repo}{\texttt{github.com/your-org/your-repo}} % TODO: replace with final URL
 \end{center}
 
 \begin{abstract}
-  % 150–200 words. Restate the core hypothesis, the approach, and the
-  % headline result. Write this last.
-  TODO: one paragraph summarising the hypothesis, the method, and the
-  main finding.
+  We study how far MPI-based parallelism can accelerate end-to-end neural-network
+  training while preserving training quality under controlled settings. Starting
+  from a serial C++17 MLP baseline on MNIST, we implement and compare four MPI
+  execution modes: flat data parallelism, two-level hierarchical data
+  parallelism, local-SGD with periodic synchronization, and layer-wise model
+  parallelism. To keep comparisons fair, all backends use matched model shape,
+  optimizer configuration, dataset subsets, and output metrics schema, and are
+  launched with one thread per rank for BLAS/OpenMP runtimes. We also apply
+  shared engineering optimizations such as memory reuse in hot paths and release
+  compiler settings. The main empirical outcome is that communication structure,
+  not only rank count, determines realized speedup: local-SGD gives the best raw
+  epoch-time scaling at large cluster size, flat DP remains a strong and stable
+  baseline, hierarchical DP does not outperform flat DP for the current model
+  size, and model parallelism is most sensitive to partition balance and
+  communication boundaries.
 \end{abstract}
 
 % ============================================================
@@ -106,9 +117,22 @@
 % What did you expect to find, and what did you actually find?
 % ---------------------------------------------------------------
 
-We investigate \textbf{[research question]}. Specifically, we hypothesize
-that \textit{[your hypothesis]}. Our experiments show that
-\textit{[brief summary of result]}.
+We investigate whether communication-aware MPI training strategies can deliver
+better time-to-epoch than a standard flat all-reduce baseline while maintaining
+comparable optimization behavior on MNIST. Our hypothesis has two parts:
+\begin{itemize}[nosep]
+  \item communication pattern matters as much as rank count, so methods that
+        reduce or amortize global synchronization should scale better at larger
+        process counts;
+  \item implementation details (memory reuse, consistent launch semantics, and
+        stable timing definitions) are necessary to expose the true algorithmic
+        differences across backends.
+\end{itemize}
+The observed results support this hypothesis. Local-SGD achieves the best
+large-scale epoch-time reduction, flat DP remains the strongest fully
+synchronous baseline, and hierarchical DP underperforms flat DP in our current
+workload regime because its extra synchronization phases are not sufficiently
+amortized by model size.
 
 % ============================================================
 \section{Context}
@@ -121,23 +145,25 @@ that \textit{[your hypothesis]}. Our experiments show that
 
 \paragraph{Member contributions.}
 \begin{itemize}[nosep]
-  \item \textbf{Author One:} TODO (e.g., designed the parallel algorithm,
-        implemented CUDA kernel).
-  \item \textbf{Author Two:} TODO (e.g., conducted performance experiments,
-        produced plots).
-  \item \textbf{Author Three:} TODO (e.g., literature review, theoretical
-        analysis).
+  \item \textbf{Author One (replace with final name):} serial baseline, shared
+        training utilities, and flat data-parallel baseline.
+  \item \textbf{Author Two (replace with final name):} hierarchical DP and
+        local-SGD variants, launch scripts, and scaling experiments.
+  \item \textbf{Author Three (replace with final name):} model-parallel path,
+        reporting pipeline, and methodology/results write-up.
 \end{itemize}
 
 \paragraph{Broader context.}
-This project \textit{[is / is not]} part of a larger research effort.
-TODO: one sentence about the research group or application domain if
-applicable.
+This project is a course-focused systems study rather than a direct sub-project
+of an external research lab artifact. Its emphasis is reproducible performance
+evaluation of parallel training designs under matched conditions.
 
 \paragraph{Applicability to other courses.}
-Variants of this project could be applied in \textit{[e.g.,
-high-performance computing, machine learning systems, etc.]} courses
-because TODO.
+Variants of this project are immediately reusable in high-performance
+computing, distributed systems, and machine-learning systems courses because the
+same codebase supports serial baselining, collective-communication studies,
+point-to-point pipeline studies, and scaling-law analysis with consistent
+metrics outputs.
 
 % ============================================================
 \section{Prior Work}
@@ -148,14 +174,25 @@ because TODO.
 % ---------------------------------------------------------------
 
 \paragraph{Work 1.}
-\citet{ref1} introduced TODO. We build on their approach by TODO.
+\citet{ref1} established a practical architecture for synchronous distributed
+data-parallel training that relies on collective communication and minimal
+intrusion into the training loop. Our flat-DP baseline follows this same
+principle: local gradient computation plus global aggregation each step, with
+careful control of launch and threading semantics.
 
 \paragraph{Work 2.}
-\citet{ref2} proposed TODO. Our implementation differs in that TODO.
+\citet{ref2} showed that periodic synchronization can significantly reduce
+communication while retaining useful convergence behavior. Our local-SGD mode
+adopts this idea by synchronizing fused model weights every \(K\) steps and
+quantifying the resulting speed/accuracy trade-off in a controlled MPI setting.
 
 \paragraph{Work 3.}
-\citet{ref3} demonstrated TODO. We compare against their results
-in Section~\ref{sec:methodology}.
+\citet{ref3} demonstrated the importance of pipeline-aware scheduling in
+model-parallel training and highlighted bubble overhead as a first-order
+performance factor. Our current model-parallel implementation is non-pipelined
+but includes explicit pipeline placeholders and an alpha-beta communication
+model to prepare a clean extension path for GPipe/1F1B-style variants in
+Section~\ref{sec:methodology}.
 
 % ============================================================
 \section{Empirical Methodology}
@@ -267,35 +304,77 @@ reserve explicit placeholders for pipelined MP variants:
 \end{algorithm}
 
 \begin{algorithm}[H]
-\caption{Model-parallel epoch (current non-pipelined schedule + pipeline placeholders)}
+\caption{Model-parallel epoch (non-pipelined, per-batch)}
 \label{alg:mp}
 \begin{algorithmic}[1]
   \Require layer partition per rank, batch size $B$
   \Ensure updated local layer parameters on each rank
   \For{each batch $(x, y)$}
-    \If{rank is first}
-      \State compute first local forward block from $x$
-      \State send activation to next rank
-    \Else
-      \State receive activation from previous rank
-      \State compute local forward block
-      \If{not last rank} send activation to next rank \EndIf
-    \EndIf
-    \If{rank is last}
-      \State compute loss and output gradient from $(y)$
-      \State backprop local layers; send gradient to previous rank
-    \Else
-      \State receive gradient from next rank
-      \State backprop local layers; \If{not first rank} send gradient to previous rank \EndIf
-    \EndIf
-    \State apply local SGD update to local layers
+    \State receive activation from previous rank (or use input if first rank)
+    \State compute local forward over owned layers
+    \State send activation to next rank (unless last rank)
+    \State receive backward gradient from next rank (or compute from loss if last rank)
+    \State compute local backward over owned layers
+    \State send gradient to previous rank (unless first rank)
+    \State update local parameters
   \EndFor
-  \State \textbf{Pipeline extension placeholder:}
-  \Statex \hspace{\algorithmicindent} TODO replace batch-level loop with micro-batch schedule.
-  \Statex \hspace{\algorithmicindent} TODO evaluate GPipe-style fill/drain vs 1F1B.
-  \Statex \hspace{\algorithmicindent} TODO report pipeline bubble fraction and overlap efficiency.
 \end{algorithmic}
 \end{algorithm}
+
+\subsection{Communication Cost Model (Alpha-Beta)}
+\label{sec:alpha-beta}
+We use the standard latency-bandwidth model:
+\begin{equation}
+T_{\text{msg}}(m) = \alpha + \beta m,
+\end{equation}
+where \(\alpha\) is startup latency, \(\beta\) is per-byte (or per-float) transfer
+cost, and \(m\) is message size.
+
+\paragraph{Flat DP (per step).}
+With all-reduce payload \(m_g\), a ring-style approximation is:
+\begin{equation}
+T_{\text{flat}}(m_g) \approx 2(P-1)\alpha + 2\frac{P-1}{P}\beta m_g.
+\end{equation}
+
+\paragraph{Hierarchical DP (per step).}
+Let \(q\) be ranks per node and \(N\) be number of nodes (\(P=Nq\)). A simple
+two-level approximation (intra reduce+bcast, inter all-reduce among leaders) is:
+\begin{equation}
+T_{\text{hier}}(m_g) \approx
+\underbrace{2\log q \, \alpha + 2\frac{q-1}{q}\beta m_g}_{\text{intra-node}}
++
+\underbrace{2(N-1)\alpha + 2\frac{N-1}{N}\beta m_g}_{\text{inter-node}}.
+\end{equation}
+This can outperform flat DP when expensive inter-node traffic is reduced and
+message size is large enough to amortize extra phases.
+
+\paragraph{Local SGD (amortized per step).}
+If weight synchronization payload is \(m_w\) and synchronization is every
+\(K\) steps:
+\begin{equation}
+T_{\text{local,step}} \approx T_{\text{compute}} + \frac{1}{K}T_{\text{sync}}(m_w),
+\end{equation}
+which explains reduced communication overhead as \(K\) increases.
+
+\paragraph{Model Parallel (non-pipelined).}
+If activation payload per boundary is \(m_a\), backward payload is \(m_b\), and
+rank \(r\) owns local compute \(C_r\):
+\begin{equation}
+T_{\text{mp,step}} \approx \sum_{r=1}^{P}\left(C_r + (\alpha+\beta m_a) + (\alpha+\beta m_b)\right).
+\end{equation}
+The practical bottleneck is the slowest stage plus boundary communication.
+
+\paragraph{Pipeline placeholders (to be completed experimentally).}
+For \(L\) pipeline stages and \(M\) microbatches, fill-drain bubble fraction is:
+\begin{equation}
+\text{bubble}(L,M) = \frac{L-1}{M+L-1}.
+\end{equation}
+Planned additions:
+\begin{itemize}[nosep]
+  \item GPipe (fill-drain) throughput model and measured bubble.
+  \item 1F1B steady-state model with overlap assumptions.
+  \item Interleaved stage model with memory/throughput trade-offs.
+\end{itemize}
 
 \subsection{Implementation Details}
 \label{sec:impl}

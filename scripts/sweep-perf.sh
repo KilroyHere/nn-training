@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sweep_chart2.sh
+# sweep-perf.sh
 #
 # Chart 2: Model-parallel vs pipeline
 #          Fixed architecture, fixed ws=8 (2x4) — vary batch size
@@ -10,8 +10,8 @@
 # Estimated time at EPOCHS=10: ~1.5 hours
 #
 # Usage:
-#   bash scripts/sweep_chart2.sh
-#   EPOCHS=5 bash scripts/sweep_chart2.sh
+#   bash scripts/sweep-perf.sh
+#   EPOCHS=5 bash scripts/sweep-perf.sh
 #
 set -euo pipefail
 
@@ -151,4 +151,4 @@ for BATCH in "${BATCHES[@]}"; do
 done
 
 echo "Done. CSV: ${MASTER_CSV}"
-echo "Visualize: python3 scripts/visualize_sweep.py ${MASTER_CSV}"
+echo "Visualize: python3 ${ROOT_DIR}/src/visualize_sweep.py ${MASTER_CSV}"

@@ -3,10 +3,10 @@
 # rank ladder at two model sizes, capturing per-epoch CSVs and stdout timing logs.
 #
 # Usage (inside a Slurm allocation with >= 4 nodes, >= 32 tasks/node):
-#   bash scripts/run_scaling_study.sh
+#   bash scripts/run_dp_scaling_study.sh
 #
 # Override any default via environment variable, e.g.:
-#   EPOCHS=5 MODELS="256,128" bash scripts/run_scaling_study.sh
+#   EPOCHS=5 MODELS="256,128" bash scripts/run_dp_scaling_study.sh
 #
 # Outputs land in results/scaling/:
 #   flat_dp_<nodes>n<ranks>r_<model>.csv            - per-epoch metrics
