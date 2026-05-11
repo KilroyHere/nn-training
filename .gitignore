@@ -7,3 +7,8 @@ data/
 # Extra safety for dataset artifacts.
 *.ubyte
 *.ubyte.gz
+
+
+*cpython*
+
+.venv

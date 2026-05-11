@@ -1,12 +1,11 @@
-// MPI data-parallel training loop and gradient synchronization logic.
-#include "train_mpi_data_parallel.h"
+// MPI data-parallel hierarchical training loop and gradient synchronization logic.
+#include "train_mpi_dp_hierarchial.h"
 
 #include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <mpi.h>
-#include <numeric>
 #include <random>
 #include <stdexcept>
 #include <vector>
@@ -17,6 +16,28 @@
 namespace nn {
 
 namespace {
+
+struct HierarchicalComms {
+    MPI_Comm intra_node_comm = MPI_COMM_NULL;
+    MPI_Comm inter_node_comm = MPI_COMM_NULL;
+    int local_rank = 0;
+    int local_size = 1;
+    int world_rank = 0;
+    int world_size = 1;
+    int inter_size = 0;
+    int node_count = 1;
+    int min_local_size = 1;
+    int max_local_size = 1;
+    bool is_leader = true;
+};
+
+// Timing breakdown for one epoch's gradient synchronization.
+struct HierarchicalTimings {
+    double intra_reduce_s = 0.0;
+    double inter_allreduce_s = 0.0;
+    double intra_bcast_s = 0.0;
+    double compute_s = 0.0;
+};
 
 // Copies selected feature rows into a preallocated batch matrix.
 void gather_rows_inplace(
@@ -76,92 +97,181 @@ std::vector<int> slice_labels(const std::vector<int>& labels, int start, int cou
         labels.begin() + start + count);
 }
 
-// All-reduces gradients across ranks and converts sums to means.
-// Returns time spent in MPI_Allreduce calls in seconds.
-double allreduce_gradients(GradientBuffers* gradients, int world_size, MPI_Comm comm) {
-    if (gradients == nullptr) {
-        throw std::invalid_argument("allreduce_gradients requires non-null gradients");
-    }
-    double allreduce_elapsed = 0.0;
-    for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
-        Matrix& grad_w = gradients->weight_grads[i];
-        std::vector<float>& grad_b = gradients->bias_grads[i];
-
-        double t0 = MPI_Wtime();
-        MPI_Allreduce(
-            MPI_IN_PLACE,
-            grad_w.data.data(),
-            static_cast<int>(grad_w.data.size()),
-            MPI_FLOAT,
-            MPI_SUM,
-            comm);
-        MPI_Allreduce(
-            MPI_IN_PLACE,
-            grad_b.data(),
-            static_cast<int>(grad_b.size()),
-            MPI_FLOAT,
-            MPI_SUM,
-            comm);
-        allreduce_elapsed += MPI_Wtime() - t0;
+// Initializes communicators for hierarchical collectives.
+HierarchicalComms create_hierarchical_comms(MPI_Comm world_comm) {
+    HierarchicalComms comms;
+    MPI_Comm_rank(world_comm, &comms.world_rank);
+    MPI_Comm_size(world_comm, &comms.world_size);
+    if (comms.world_size <= 0) {
+        throw std::runtime_error("Invalid MPI world size");
     }
 
-    const float inv_world = 1.0f / static_cast<float>(world_size);
-    for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
-        Matrix& grad_w = gradients->weight_grads[i];
-        std::vector<float>& grad_b = gradients->bias_grads[i];
-        for (float& v : grad_w.data) {
-            v *= inv_world;
-        }
-        for (float& v : grad_b) {
-            v *= inv_world;
-        }
+    MPI_Comm_split_type(
+        world_comm,
+        MPI_COMM_TYPE_SHARED,
+        comms.world_rank,
+        MPI_INFO_NULL,
+        &comms.intra_node_comm);
+    if (comms.intra_node_comm == MPI_COMM_NULL) {
+        throw std::runtime_error("Failed to create intra-node communicator");
     }
-    return allreduce_elapsed;
+
+    MPI_Comm_rank(comms.intra_node_comm, &comms.local_rank);
+    MPI_Comm_size(comms.intra_node_comm, &comms.local_size);
+    comms.is_leader = (comms.local_rank == 0);
+
+    const int leader_color = comms.is_leader ? 0 : MPI_UNDEFINED;
+    MPI_Comm_split(world_comm, leader_color, comms.world_rank, &comms.inter_node_comm);
+    if (comms.is_leader && comms.inter_node_comm == MPI_COMM_NULL) {
+        throw std::runtime_error("Failed to create inter-node leader communicator");
+    }
+    if (comms.is_leader) {
+        MPI_Comm_size(comms.inter_node_comm, &comms.inter_size);
+    }
+
+    const int local_is_leader = comms.is_leader ? 1 : 0;
+    MPI_Allreduce(&local_is_leader, &comms.node_count, 1, MPI_INT, MPI_SUM, world_comm);
+
+    MPI_Allreduce(&comms.local_size, &comms.min_local_size, 1, MPI_INT, MPI_MIN, world_comm);
+    MPI_Allreduce(&comms.local_size, &comms.max_local_size, 1, MPI_INT, MPI_MAX, world_comm);
+    return comms;
 }
 
-// Runs one MPI-DP epoch with fixed global-batch semantics.
-EpochMetrics run_mpi_dp_epoch(
+// Releases hierarchical communicators.
+void destroy_hierarchical_comms(HierarchicalComms* comms) {
+    if (comms == nullptr) {
+        return;
+    }
+    if (comms->inter_node_comm != MPI_COMM_NULL) {
+        MPI_Comm_free(&comms->inter_node_comm);
+    }
+    if (comms->intra_node_comm != MPI_COMM_NULL) {
+        MPI_Comm_free(&comms->intra_node_comm);
+    }
+}
+
+// Hierarchically reduces gradients across all ranks using fused buffers, then averages.
+// All weight and bias gradients are packed into one flat buffer so the three collective
+// phases (intra Reduce → inter Allreduce → intra Bcast) each issue a single MPI call
+// regardless of layer count, minimising per-call latency and enabling larger-message
+// algorithms in the MPI runtime.
+void allreduce_gradients_hierarchial(
+    GradientBuffers* gradients,
+    const HierarchicalComms& comms,
+    HierarchicalTimings* timings) {
+    if (gradients == nullptr) {
+        throw std::invalid_argument("allreduce_gradients_hierarchial requires non-null gradients");
+    }
+
+    // Compute total gradient element count and pack into one contiguous buffer.
+    size_t total = 0;
+    for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
+        total += gradients->weight_grads[i].data.size();
+        total += gradients->bias_grads[i].size();
+    }
+    std::vector<float> buf(total);
+    size_t offset = 0;
+    for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
+        std::copy(gradients->weight_grads[i].data.begin(),
+                  gradients->weight_grads[i].data.end(),
+                  buf.begin() + static_cast<std::ptrdiff_t>(offset));
+        offset += gradients->weight_grads[i].data.size();
+        std::copy(gradients->bias_grads[i].begin(),
+                  gradients->bias_grads[i].end(),
+                  buf.begin() + static_cast<std::ptrdiff_t>(offset));
+        offset += gradients->bias_grads[i].size();
+    }
+    const int count = static_cast<int>(total);
+
+    // Phase 1: one intra-node Reduce to local root (rank 0 within node).
+    double t0 = MPI_Wtime();
+    MPI_Reduce(
+        comms.is_leader ? MPI_IN_PLACE : buf.data(),
+        buf.data(),
+        count,
+        MPI_FLOAT,
+        MPI_SUM,
+        0,
+        comms.intra_node_comm);
+    if (timings != nullptr) {
+        timings->intra_reduce_s += MPI_Wtime() - t0;
+    }
+
+    // Phase 2: one inter-node Allreduce among node leaders only.
+    // Skipped when there is only one node (inter_size == 1).
+    if (comms.is_leader && comms.inter_size > 1) {
+        double t1 = MPI_Wtime();
+        MPI_Allreduce(
+            MPI_IN_PLACE,
+            buf.data(),
+            count,
+            MPI_FLOAT,
+            MPI_SUM,
+            comms.inter_node_comm);
+        if (timings != nullptr) {
+            timings->inter_allreduce_s += MPI_Wtime() - t1;
+        }
+    }
+
+    // Phase 3: one intra-node Bcast from local root to all ranks on node.
+    double t2 = MPI_Wtime();
+    MPI_Bcast(buf.data(), count, MPI_FLOAT, 0, comms.intra_node_comm);
+    if (timings != nullptr) {
+        timings->intra_bcast_s += MPI_Wtime() - t2;
+    }
+
+    // Unpack fused buffer back into per-layer gradient tensors, scaling to global mean.
+    const float inv_world = 1.0f / static_cast<float>(comms.world_size);
+    offset = 0;
+    for (size_t i = 0; i < gradients->weight_grads.size(); ++i) {
+        for (float& v : gradients->weight_grads[i].data) {
+            v = buf[offset++] * inv_world;
+        }
+        for (float& v : gradients->bias_grads[i]) {
+            v = buf[offset++] * inv_world;
+        }
+    }
+}
+
+// Runs one MPI-DP hierarchial epoch with fixed global-batch semantics.
+EpochMetrics run_mpi_dp_hierarchial_epoch(
     MLP* model,
     const TrainConfig& config,
     const Dataset& train,
     const Dataset& val,
     std::vector<int>* epoch_indices,
     std::mt19937* rng,
-    int rank,
-    int world_size,
-    MPI_Comm comm) {
+    const HierarchicalComms& comms) {
     if (model == nullptr || epoch_indices == nullptr || rng == nullptr) {
-        throw std::invalid_argument("run_mpi_dp_epoch requires non-null pointers");
+        throw std::invalid_argument("run_mpi_dp_hierarchial_epoch requires non-null pointers");
     }
-    if (config.batch_size % world_size != 0) {
+    if (config.batch_size % comms.world_size != 0) {
         throw std::invalid_argument("batch_size must be divisible by MPI world size");
     }
 
-    const int local_batch = config.batch_size / world_size;
+    const int local_batch = config.batch_size / comms.world_size;
     std::shuffle(epoch_indices->begin(), epoch_indices->end(), *rng);
 
-    // Barrier-align timing so epoch time reflects global wall-clock progress.
-    MPI_Barrier(comm);
+    MPI_Barrier(MPI_COMM_WORLD);
     const auto start = std::chrono::high_resolution_clock::now();
 
     float local_running_loss = 0.0f;
     float local_running_acc = 0.0f;
     int local_steps = 0;
-    double total_compute_s = 0.0;
-    double total_allreduce_s = 0.0;
+    HierarchicalTimings timings;
     Matrix x_batch(local_batch, train.features.cols, 0.0f);
     std::vector<int> y_batch(static_cast<size_t>(local_batch));
     GradientBuffers gradients;
     for (int pos = 0; pos + config.batch_size <= train.features.rows; pos += config.batch_size) {
-        const int local_start = pos + (rank * local_batch);
+        const int local_start = pos + (comms.world_rank * local_batch);
         gather_rows_inplace(train.features, *epoch_indices, local_start, local_batch, &x_batch);
         gather_labels_inplace(train.labels, *epoch_indices, local_start, local_batch, &y_batch);
 
         double t_compute = MPI_Wtime();
         const BatchMetrics local_metrics = model->compute_batch_gradients(x_batch, y_batch, &gradients);
-        total_compute_s += MPI_Wtime() - t_compute;
+        timings.compute_s += MPI_Wtime() - t_compute;
 
-        total_allreduce_s += allreduce_gradients(&gradients, world_size, comm);
+        allreduce_gradients_hierarchial(&gradients, comms, &timings);
         model->apply_gradients(gradients, config.learning_rate);
 
         local_running_loss += local_metrics.loss;
@@ -179,10 +289,10 @@ EpochMetrics run_mpi_dp_epoch(
         static_cast<double>(local_running_acc),
         static_cast<double>(local_steps)};
     double global_loss_acc_steps[3] = {0.0, 0.0, 0.0};
-    MPI_Allreduce(loss_acc_steps, global_loss_acc_steps, 3, MPI_DOUBLE, MPI_SUM, comm);
+    MPI_Allreduce(loss_acc_steps, global_loss_acc_steps, 3, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
     // Stop clock here — epoch_time_ms covers only the training loop + train metric reduce.
-    MPI_Barrier(comm);
+    MPI_Barrier(MPI_COMM_WORLD);
     const auto end = std::chrono::high_resolution_clock::now();
 
     EpochMetrics out;
@@ -191,9 +301,8 @@ EpochMetrics run_mpi_dp_epoch(
     out.epoch_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
     // Distributed val eval (outside training timer).
-    // Each rank evaluates its contiguous slice; tail samples are dropped.
-    const int val_per_rank = val.features.rows / world_size;
-    const int val_start = rank * val_per_rank;
+    const int val_per_rank = val.features.rows / comms.world_size;
+    const int val_start = comms.world_rank * val_per_rank;
     double val_loss_sum = 0.0;
     double val_correct_sum = 0.0;
     if (val_per_rank > 0) {
@@ -205,17 +314,22 @@ EpochMetrics run_mpi_dp_epoch(
     }
     double val_stats[3] = {val_loss_sum, val_correct_sum, static_cast<double>(val_per_rank)};
     double global_val_stats[3] = {0.0, 0.0, 0.0};
-    MPI_Allreduce(val_stats, global_val_stats, 3, MPI_DOUBLE, MPI_SUM, comm);
+    MPI_Allreduce(val_stats, global_val_stats, 3, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     out.val_loss = static_cast<float>(global_val_stats[0] / global_val_stats[2]);
     out.val_acc = static_cast<float>(global_val_stats[1] / global_val_stats[2]);
 
-    if (rank == 0) {
-        const double compute_ms = total_compute_s * 1e3;
-        const double allreduce_ms = total_allreduce_s * 1e3;
-        const double other_ms = out.epoch_time_ms - compute_ms - allreduce_ms;
-        std::cout << "[mpi-dp][timing] "
+    if (comms.world_rank == 0) {
+        const double compute_ms = timings.compute_s * 1e3;
+        const double intra_reduce_ms = timings.intra_reduce_s * 1e3;
+        const double inter_allreduce_ms = timings.inter_allreduce_s * 1e3;
+        const double intra_bcast_ms = timings.intra_bcast_s * 1e3;
+        const double other_ms =
+            out.epoch_time_ms - compute_ms - intra_reduce_ms - inter_allreduce_ms - intra_bcast_ms;
+        std::cout << "[mpi-dp-hierarchial][timing] "
                   << "compute_ms=" << compute_ms
-                  << " allreduce_ms=" << allreduce_ms
+                  << " intra_reduce_ms=" << intra_reduce_ms
+                  << " inter_allreduce_ms=" << inter_allreduce_ms
+                  << " intra_bcast_ms=" << intra_bcast_ms
                   << " other_ms=" << other_ms
                   << std::endl;
     }
@@ -224,8 +338,10 @@ EpochMetrics run_mpi_dp_epoch(
 
 }  // namespace
 
-// Top-level MPI data-parallel training runner and CSV writer.
-int run_mpi_data_parallel_training(const TrainConfig& config, std::string* error_message) {
+// Top-level MPI data-parallel hierarchial training runner and CSV writer.
+int run_mpi_dp_hierarchial_training(const TrainConfig& config, std::string* error_message) {
+    HierarchicalComms comms;
+    bool comms_initialized = false;
     try {
         validate_train_config(config);
         int initialized = 0;
@@ -234,15 +350,10 @@ int run_mpi_data_parallel_training(const TrainConfig& config, std::string* error
             throw std::runtime_error("MPI must be initialized before calling DP training");
         }
 
-        int rank = 0;
-        int world_size = 1;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+        comms = create_hierarchical_comms(MPI_COMM_WORLD);
+        comms_initialized = true;
 
-        if (world_size <= 0) {
-            throw std::runtime_error("Invalid MPI world size");
-        }
-        if (config.batch_size % world_size != 0) {
+        if (config.batch_size % comms.world_size != 0) {
             throw std::invalid_argument("batch_size must be divisible by MPI world size");
         }
 
@@ -253,7 +364,7 @@ int run_mpi_data_parallel_training(const TrainConfig& config, std::string* error
 
         std::ofstream out;
         const std::string hidden_layers = hidden_layers_csv(config.hidden_layers);
-        if (rank == 0) {
+        if (comms.world_rank == 0) {
             if (!ensure_parent_dir(config.output_csv)) {
                 throw std::runtime_error("Failed to create output directory for: " + config.output_csv);
             }
@@ -263,22 +374,24 @@ int run_mpi_data_parallel_training(const TrainConfig& config, std::string* error
             }
             out << "mode,seed,learning_rate,batch_size,train_samples,val_samples,hidden_layers,"
                    "epoch,train_loss,train_acc,val_loss,val_acc,epoch_time_ms\n";
+            std::cout << "[mpi_dp_hierarchial] world_size=" << comms.world_size
+                      << " node_count=" << comms.node_count
+                      << " local_size_min=" << comms.min_local_size
+                      << " local_size_max=" << comms.max_local_size << std::endl;
         }
 
         for (int epoch = 1; epoch <= config.epochs; ++epoch) {
-            const EpochMetrics epoch_metrics = run_mpi_dp_epoch(
+            const EpochMetrics epoch_metrics = run_mpi_dp_hierarchial_epoch(
                 &mlp,
                 config,
                 datasets.train,
                 datasets.val,
                 &datasets.train_epoch_indices,
                 &rng,
-                rank,
-                world_size,
-                MPI_COMM_WORLD);
+                comms);
 
-            if (rank == 0) {
-                out << "mpi,"
+            if (comms.world_rank == 0) {
+                out << "mpi_dp_hierarchial,"
                     << config.seed << ","
                     << config.learning_rate << ","
                     << config.batch_size << ","
@@ -292,7 +405,7 @@ int run_mpi_data_parallel_training(const TrainConfig& config, std::string* error
                     << epoch_metrics.val_acc << ","
                     << epoch_metrics.epoch_time_ms << "\n";
 
-                std::cout << "[mpi-dp] epoch " << epoch << "/" << config.epochs
+                std::cout << "[mpi-dp-hierarchial] epoch " << epoch << "/" << config.epochs
                           << " time_ms=" << epoch_metrics.epoch_time_ms
                           << " train_loss=" << epoch_metrics.train_loss
                           << " train_acc=" << epoch_metrics.train_acc
@@ -300,8 +413,13 @@ int run_mpi_data_parallel_training(const TrainConfig& config, std::string* error
                           << " val_acc=" << epoch_metrics.val_acc << std::endl;
             }
         }
+
+        destroy_hierarchical_comms(&comms);
         return 0;
     } catch (const std::exception& ex) {
+        if (comms_initialized) {
+            destroy_hierarchical_comms(&comms);
+        }
         if (error_message != nullptr) {
             *error_message = ex.what();
         }

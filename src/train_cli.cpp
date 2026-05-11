@@ -45,7 +45,8 @@ void print_train_usage() {
               << "  --val-samples <int>\n"
               << "  --hidden <comma-separated ints>\n"
               << "  --data-dir <path>\n"
-              << "  --output <path>\n";
+              << "  --output <path>\n"
+              << "  --sync-every <int>  (local SGD: steps between weight syncs, default 1)\n";
 }
 
 CliParseResult parse_train_args(
@@ -97,6 +98,8 @@ CliParseResult parse_train_args(
                     *error_message = "Invalid --hidden list: " + value;
                     return CliParseResult::kError;
                 }
+            } else if (arg == "--sync-every" && consume_value(&value)) {
+                config->sync_every = std::stoi(value);
             } else {
                 *error_message = "Unknown or malformed argument: " + arg;
                 return CliParseResult::kError;

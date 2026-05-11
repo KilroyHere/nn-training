@@ -1,0 +1,466 @@
+% ============================================================
+%  Final Project Report
+%  Course: [Your Course Name / Number]
+%  Deadline: May 13, midnight (AoE) — STRICT
+% ============================================================
+\documentclass[11pt]{article}
+
+% ----- Page layout -----
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}           % line-spacing helpers if needed
+
+% ----- Fonts & encoding -----
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+
+% ----- Math -----
+\usepackage{amsmath, amssymb, amsthm}
+
+% ----- Graphics & figures -----
+\usepackage{graphicx}
+\usepackage{subcaption}         % side-by-side subfigures
+\usepackage{float}              % [H] placement
+\usepackage{tikz}               % optional inline diagrams
+
+% ----- Tables -----
+\usepackage{booktabs}
+\usepackage{multirow}
+
+% ----- Code listings -----
+\usepackage{listings}
+\usepackage{xcolor}
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{teal},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  frame=single,
+  breaklines=true,
+  captionpos=b
+}
+
+% ----- Hyperlinks -----
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+% ----- Bibliography -----
+\usepackage{natbib}             % \citep / \citet style; swap for biblatex if preferred
+
+% ----- Miscellaneous -----
+\usepackage{microtype}          % better justification
+\usepackage{enumitem}           % compact lists
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+
+\algblockdefx[ParFor]{ParFor}{EndParFor}[1]
+  {\textbf{for} #1 \textbf{do in parallel}}
+  {\textbf{end for}}
+% ============================================================
+%  Title block
+% ============================================================
+\title{
+  \textbf{[Project Title]} \\[4pt]
+  \large Final Project Report
+}
+
+\author{
+  Author One\thanks{Equal contribution.} \quad
+  Author Two$^*$ \quad
+  Author Three \\[2pt]
+  \textit{[Course Name \& Number, Institution]}
+}
+
+\date{May 2026}
+
+% ============================================================
+\begin{document}
+\maketitle
+
+% GitHub repo — required by submission guidelines
+\begin{center}
+  \textbf{GitHub Repository:}
+  \href{https://github.com/your-org/your-repo}{\texttt{github.com/your-org/your-repo}}
+\end{center}
+
+\begin{abstract}
+  % 150–200 words. Restate the core hypothesis, the approach, and the
+  % headline result. Write this last.
+  TODO: one paragraph summarising the hypothesis, the method, and the
+  main finding.
+\end{abstract}
+
+% ============================================================
+\section{Hypothesis}
+\label{sec:hypothesis}
+% ---------------------------------------------------------------
+% State the question you want to investigate.
+% What did you expect to find, and what did you actually find?
+% ---------------------------------------------------------------
+
+We investigate \textbf{[research question]}. Specifically, we hypothesize
+that \textit{[your hypothesis]}. Our experiments show that
+\textit{[brief summary of result]}.
+
+% ============================================================
+\section{Context}
+\label{sec:context}
+% ---------------------------------------------------------------
+% • Main contribution of each member.
+% • Is this a sub-project of a larger research project?
+% • Could variants be used in other courses?
+% ---------------------------------------------------------------
+
+\paragraph{Member contributions.}
+\begin{itemize}[nosep]
+  \item \textbf{Author One:} TODO (e.g., designed the parallel algorithm,
+        implemented CUDA kernel).
+  \item \textbf{Author Two:} TODO (e.g., conducted performance experiments,
+        produced plots).
+  \item \textbf{Author Three:} TODO (e.g., literature review, theoretical
+        analysis).
+\end{itemize}
+
+\paragraph{Broader context.}
+This project \textit{[is / is not]} part of a larger research effort.
+TODO: one sentence about the research group or application domain if
+applicable.
+
+\paragraph{Applicability to other courses.}
+Variants of this project could be applied in \textit{[e.g.,
+high-performance computing, machine learning systems, etc.]} courses
+because TODO.
+
+% ============================================================
+\section{Prior Work}
+\label{sec:prior}
+% ---------------------------------------------------------------
+% ~3 previous works this project builds on, is motivated by,
+% or will be compared against.
+% ---------------------------------------------------------------
+
+\paragraph{Work 1.}
+\citet{ref1} introduced TODO. We build on their approach by TODO.
+
+\paragraph{Work 2.}
+\citet{ref2} proposed TODO. Our implementation differs in that TODO.
+
+\paragraph{Work 3.}
+\citet{ref3} demonstrated TODO. We compare against their results
+in Section~\ref{sec:methodology}.
+
+% ============================================================
+\section{Empirical Methodology}
+\label{sec:methodology}
+\subsection{Problem Setup}
+We study parallel training of a feed-forward MLP on MNIST with a fixed
+optimization setup and matched data split across implementations. The
+primary model for scaling is
+$784 \rightarrow 256 \rightarrow 128 \rightarrow 64 \rightarrow 10$,
+trained with SGD and cross-entropy. The project compares five execution
+modes:
+\begin{itemize}[nosep]
+  \item \textbf{Serial}: single-process baseline.
+  \item \textbf{Flat MPI Data Parallel (DP)}: each rank computes local gradients, then performs
+        gradient all-reduce every step.
+  \item \textbf{Hierarchical MPI DP}: per-step gradient synchronization split into
+        intra-node reduce, inter-node all-reduce (leaders), and intra-node broadcast.
+  \item \textbf{Local SGD}: each rank performs local SGD and averages weights every $K$ steps.
+  \item \textbf{Model Parallel (MP)}: layers are partitioned across ranks and
+        activations/gradients are exchanged between neighboring partitions.
+\end{itemize}
+
+\subsection{Sequential Baseline}
+\label{sec:baseline}
+The sequential baseline uses the same MLP, loss, and optimizer as all MPI
+variants. It runs a shuffled mini-batch loop over training data and reports
+\texttt{epoch\_time\_ms} as \emph{training-loop-only} wall time (validation
+evaluation is measured but excluded from epoch timing). This timing definition
+is intentionally mirrored in the MPI backends to keep scaling comparisons
+consistent.
+
+\subsection{Parallel Design}
+\label{sec:parallel-design}
+\paragraph{Why multiple algorithms are shown.}
+The implementations do not share one execution pattern. Serial training has no
+communication. Data-parallel methods synchronize gradients or weights with
+collectives. Model parallelism partitions layers and exchanges intermediate
+tensors point-to-point. For clarity, we therefore present separate algorithms
+for (1) serial training, (2) data-parallel training, and (3) model-parallel
+training.
+
+\paragraph{Serial.}
+Single-process SGD over shuffled mini-batches; no MPI calls.
+
+\begin{algorithm}[H]
+\caption{Serial training epoch}
+\label{alg:serial}
+\begin{algorithmic}[1]
+  \Require shuffled indices $I$, batch size $B$, parameters $\theta$
+  \Ensure updated $\theta$ after one epoch
+  \For{$t = 0, B, 2B, \dots$}
+    \State gather batch $(x, y)$ from $I$
+    \State $g \leftarrow \nabla \ell(\theta; x, y)$
+    \State $\theta \leftarrow \theta - \eta g$
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Flat DP.}
+Each rank processes a disjoint shard of each global batch, computes local
+gradients, then uses \texttt{MPI\_Allreduce} on layer gradients to form the
+global mean gradient before applying the update.
+
+\paragraph{Hierarchical DP.}
+Gradient synchronization is decomposed into three phases:
+\texttt{MPI\_Reduce} within a node, \texttt{MPI\_Allreduce} across node
+leaders, then \texttt{MPI\_Bcast} within each node. This reduces inter-node
+participants but introduces extra synchronization phases.
+
+\paragraph{Local SGD.}
+Ranks execute local updates independently and synchronize model weights via one
+fused \texttt{MPI\_Allreduce} every $K$ steps (\(K \in \{10, 50\}\) in this
+report). This trades statistical freshness for lower communication frequency.
+
+\paragraph{Model Parallel (MP).}
+Layers are partitioned across ranks. Forward activations and backward gradients
+are exchanged via point-to-point MPI between adjacent layer partitions. In
+this report, MP is treated as a first-class method in the main project (not an
+auxiliary baseline). We currently evaluate a non-pipelined schedule, and we
+reserve explicit placeholders for pipelined MP variants:
+\begin{itemize}[nosep]
+  \item \textbf{Pipeline placeholder A (inference-style fill/drain):}
+        TODO add timeline and throughput model for micro-batch pipeline.
+  \item \textbf{Pipeline placeholder B (1F1B schedule):}
+        TODO add 1F1B warmup/steady/cooldown schedule and bubble analysis.
+  \item \textbf{Pipeline placeholder C (interleaved virtual stages):}
+        TODO add interleaved stage assignment and expected memory trade-offs.
+\end{itemize}
+
+\begin{algorithm}[H]
+\caption{Data-parallel epoch (flat DP / hierarchical DP / local SGD)}
+\label{alg:dp}
+\begin{algorithmic}[1]
+  \Require shuffled index list $I$, global batch size $B$, rank count $P$
+  \Ensure updated model parameters after one epoch
+  \For{global batch offset $t = 0, B, 2B, \dots$}
+    \State gather local mini-batch $(x_r, y_r)$ from $I$
+    \State compute local gradients $g_r \leftarrow \nabla \ell(\theta; x_r, y_r)$
+    \If{mode is Flat DP}
+      \State $g \leftarrow \texttt{AllreduceMean}(g_r)$
+    \ElsIf{mode is Hierarchical DP}
+      \State $g \leftarrow \texttt{IntraReduce} \rightarrow \texttt{InterAllreduce} \rightarrow \texttt{IntraBcast}$
+    \ElsIf{mode is Local SGD}
+      \State set $g \leftarrow g_r$; synchronize weights only every $K$ steps
+    \EndIf
+    \State apply SGD update with synchronized quantity (gradient or weight)
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{Model-parallel epoch (current non-pipelined schedule + pipeline placeholders)}
+\label{alg:mp}
+\begin{algorithmic}[1]
+  \Require layer partition per rank, batch size $B$
+  \Ensure updated local layer parameters on each rank
+  \For{each batch $(x, y)$}
+    \If{rank is first}
+      \State compute first local forward block from $x$
+      \State send activation to next rank
+    \Else
+      \State receive activation from previous rank
+      \State compute local forward block
+      \If{not last rank} send activation to next rank \EndIf
+    \EndIf
+    \If{rank is last}
+      \State compute loss and output gradient from $(y)$
+      \State backprop local layers; send gradient to previous rank
+    \Else
+      \State receive gradient from next rank
+      \State backprop local layers; \If{not first rank} send gradient to previous rank \EndIf
+    \EndIf
+    \State apply local SGD update to local layers
+  \EndFor
+  \State \textbf{Pipeline extension placeholder:}
+  \Statex \hspace{\algorithmicindent} TODO replace batch-level loop with micro-batch schedule.
+  \Statex \hspace{\algorithmicindent} TODO evaluate GPipe-style fill/drain vs 1F1B.
+  \Statex \hspace{\algorithmicindent} TODO report pipeline bubble fraction and overlap efficiency.
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Implementation Details}
+\label{sec:impl}
+The system is implemented in C++17 with MPI collectives/point-to-point
+communication and BLAS-backed dense linear algebra. Key implementation choices
+that affect performance and reproducibility are:
+\begin{itemize}[nosep]
+  \item \textbf{BLAS acceleration:}
+        matrix multiply and vector updates were moved to BLAS-backed kernels
+        (\texttt{sgemm/saxpy/sgemv}) to reduce scalar-loop overhead.
+  \item \textbf{Backend isolation:}
+        serial, flat DP, hierarchical DP, local-SGD, and model-parallel paths
+        are built as separate executables with dedicated launch scripts.
+  \item \textbf{Memory reuse in hot loops:}
+        \begin{itemize}[nosep]
+          \item preallocated mini-batch feature/label buffers are reused across steps
+                to avoid per-batch allocation churn;
+          \item gather paths use contiguous writes to improve locality;
+          \item gradient and workspace buffers are reused in the shared MLP training path.
+        \end{itemize}
+  \item \textbf{Compiler configuration:}
+        Release builds use \texttt{-O3}, with optional \texttt{-march=native}
+        and optional IPO/LTO when supported.
+\end{itemize}
+Because model parallelism uses a separate \texttt{MPLayerSlice} forward/backward
+path, some MLP-internal workspace optimizations apply directly to serial and
+data-parallel modes, while MP performance is driven more by partitioning balance
+and point-to-point communication behavior.
+
+\subsection{Experimental Setup}
+\label{sec:setup}
+All strong-scaling sweeps were executed through Slurm \texttt{srun} launchers.
+Thread-level oversubscription was disabled by pinning:
+\texttt{OMP\_NUM\_THREADS=1},
+\texttt{OPENBLAS\_NUM\_THREADS=1},
+\texttt{MKL\_NUM\_THREADS=1}.
+The primary sweep used:
+\begin{itemize}[nosep]
+  \item epochs \(=10\), global batch \(=1024\)
+  \item train/validation samples \(=50{,}000 / 10{,}000\)
+  \item learning rate \(=0.03\), seed \(=42\)
+  \item hidden layers \(=256,128,64\)
+  \item rank ladder:
+        \(1n4r \rightarrow 1n16r \rightarrow 1n32r \rightarrow 2n64r \rightarrow 4n128r\)
+\end{itemize}
+Timing and summary outputs are generated from
+\texttt{results/scaling/*.csv} and \texttt{results/scaling/*.log} via
+\texttt{summarize\_dp\_scaling.py} and \texttt{make\_scaling\_visuals.py}.
+
+\begin{table}[H]
+\centering
+\caption{Software/runtime configuration used for scaling runs.}
+\label{tab:setup}
+\begin{tabular}{ll}
+\toprule
+\textbf{Component} & \textbf{Specification} \\
+\midrule
+Runtime launcher & Slurm \texttt{srun} + MPI \\
+Threading policy & OMP/BLAS/MKL threads pinned to 1 \\
+Build mode & Release (\texttt{-O3}, optional \texttt{-march=native}, optional IPO) \\
+Dataset & MNIST (local cache via \texttt{prepare\_mnist.sh}) \\
+Model for main sweep & MLP \(256,128,64\) hidden layers \\
+Scaling configs & \(1n4r, 1n16r, 1n32r, 2n64r, 4n128r\) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Results}
+\label{sec:results}
+
+\subsubsection{Scaling Analysis}
+Figure~\ref{fig:epoch-vs-cluster} shows epoch time vs cluster size with serial
+baseline and ideal scaling reference. Local-SGD achieves the best time at
+128 ranks (K=50 fastest), while flat DP remains more efficient than
+hierarchical DP for this model size and workload regime. This indicates that
+hierarchical communication overhead (extra phases per step) is not amortized
+sufficiently at the current gradient payload.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.88\linewidth]{../results/scaling/07_time_vs_cluster_with_serial.png}
+  \caption{Epoch time vs cluster size with serial baseline and ideal line
+  (MLP \(256\rightarrow128\rightarrow64\), MNIST, 10 epochs).}
+  \label{fig:epoch-vs-cluster}
+\end{figure}
+
+\subsubsection{Strong Scaling}
+Using flat DP at \(1n4r\) as baseline (\(\approx 5003\) ms/epoch), strong-scaling
+speedup and efficiency are:
+
+\begin{table}[H]
+\centering
+\caption{Strong scaling for flat DP (baseline: \(1n4r\)).}
+\label{tab:strong}
+\begin{tabular}{rrrr}
+\toprule
+\textbf{Config} & \textbf{Time (ms)} & \textbf{Speedup $S(p)$} & \textbf{Efficiency $E(p)$} \\
+\midrule
+1n4r   & 5003 & 1.00$\times$ & 100.0\% \\
+1n16r  & 1555 & 3.22$\times$ & 80.4\% \\
+1n32r  & 1001 & 5.00$\times$ & 62.5\% \\
+2n64r  &  746 & 6.71$\times$ & 41.9\% \\
+4n128r &  595 & 8.40$\times$ & 26.3\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Compared to flat DP, hierarchical DP trails at all tested scales in the
+current runs, while Local-SGD surpasses flat DP speedup as \(K\) increases,
+reaching \(21.46\times\) speedup at \(4n128r\) (K=50) relative to the flat-DP
+4-rank baseline.
+
+\subsubsection{Weak Scaling}
+This report focuses on strong scaling. A dedicated weak-scaling sweep
+(proportionally increasing data size with rank count) is not yet included in
+the current artifact set and is left as future work.
+
+\subsubsection{Additional Results}
+Timing breakdowns from logs show:
+\begin{itemize}[nosep]
+  \item flat DP: communication cost appears primarily in \texttt{allreduce\_ms},
+        while \texttt{other\_ms} remains non-negligible at high ranks.
+  \item hierarchical DP: cost is split into
+        \texttt{intra\_reduce\_ms}, \texttt{inter\_allreduce\_ms}, and
+        \texttt{intra\_bcast\_ms}, confirming additional synchronization phases.
+  \item local-SGD: \texttt{sync\_ms} is much smaller than per-step DP comm cost
+        because communication occurs only every \(K\) steps.
+\end{itemize}
+Accuracy trade-off is modest for the fastest local-SGD settings in these runs:
+at 128 ranks, K=50 is fastest with a small validation-accuracy drop relative to
+flat DP.
+
+% ============================================================
+\section{Challenges and Obstacles}
+\label{sec:challenges}
+% ---------------------------------------------------------------
+% Obstacles encountered.
+% Hypotheses for things that did not work as expected.
+% ---------------------------------------------------------------
+
+\paragraph{[Challenge 1].} TODO: describe what you tried, what
+happened, and your hypothesis for why.
+
+\paragraph{[Challenge 2].} TODO.
+
+\paragraph{[Challenge 3].} TODO.
+
+% ============================================================
+% Bibliography
+% ============================================================
+\bibliographystyle{plainnat}
+\bibliography{references}   % reads references.bib
+
+% If you prefer inline bibliography, uncomment the block below
+% and remove the two lines above.
+%
+% \begin{thebibliography}{9}
+% \bibitem{ref1}
+%   Author A, Author B.
+%   \textit{Title of paper 1}.
+%   Venue, Year.
+% \bibitem{ref2}
+%   TODO
+% \bibitem{ref3}
+%   TODO
+% \end{thebibliography}
+
+\end{document}

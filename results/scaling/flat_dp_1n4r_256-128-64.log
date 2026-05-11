@@ -1,0 +1,21 @@
+[mpi-dp][timing] compute_ms=4077.64 allreduce_ms=43.1156 other_ms=19.2462
+[mpi-dp] epoch 1/10 time_ms=4140 train_loss=1.86302 train_acc=0.452616 val_loss=1.28543 val_acc=0.7085
+[mpi-dp][timing] compute_ms=4077.02 allreduce_ms=43.9309 other_ms=19.0495
+[mpi-dp] epoch 2/10 time_ms=4140 train_loss=0.919836 train_acc=0.790405 val_loss=0.635175 val_acc=0.8466
+[mpi-dp][timing] compute_ms=4077.16 allreduce_ms=44.5412 other_ms=19.2969
+[mpi-dp] epoch 3/10 time_ms=4141 train_loss=0.567121 train_acc=0.85437 val_loss=0.46744 val_acc=0.8753
+[mpi-dp][timing] compute_ms=4077.59 allreduce_ms=43.5502 other_ms=18.855
+[mpi-dp] epoch 4/10 time_ms=4140 train_loss=0.45352 train_acc=0.876668 val_loss=0.396354 val_acc=0.893
+[mpi-dp][timing] compute_ms=4079.8 allreduce_ms=41.6391 other_ms=19.5638
+[mpi-dp] epoch 5/10 time_ms=4141 train_loss=0.396435 train_acc=0.889791 val_loss=0.355489 val_acc=0.9014
+[mpi-dp][timing] compute_ms=4087.75 allreduce_ms=42.6125 other_ms=18.6378
+[mpi-dp] epoch 6/10 time_ms=4149 train_loss=0.360357 train_acc=0.898844 val_loss=0.330869 val_acc=0.9079
+[mpi-dp][timing] compute_ms=4083.4 allreduce_ms=43.3252 other_ms=19.2732
+[mpi-dp] epoch 7/10 time_ms=4146 train_loss=0.33562 train_acc=0.90564 val_loss=0.310488 val_acc=0.9129
+[mpi-dp][timing] compute_ms=4082.32 allreduce_ms=41.8322 other_ms=18.8459
+[mpi-dp] epoch 8/10 time_ms=4143 train_loss=0.316509 train_acc=0.910339 val_loss=0.294327 val_acc=0.9165
+[mpi-dp][timing] compute_ms=4081.22 allreduce_ms=42.332 other_ms=19.4481
+[mpi-dp] epoch 9/10 time_ms=4143 train_loss=0.300693 train_acc=0.91453 val_loss=0.281514 val_acc=0.9203
+[mpi-dp][timing] compute_ms=4080.91 allreduce_ms=41.5339 other_ms=18.5595
+[mpi-dp] epoch 10/10 time_ms=4141 train_loss=0.286847 train_acc=0.918498 val_loss=0.272016 val_acc=0.9226
+Training finished (mpi-dp). Metrics written to /global/homes/a/ap2568/nn_training/results/scaling/flat_dp_1n4r_256-128-64.csv

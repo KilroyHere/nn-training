@@ -16,30 +16,44 @@ namespace nn {
 
 namespace {
 
-// Copies selected feature rows into a contiguous serial batch.
-Matrix gather_rows(const Matrix& m, const std::vector<int>& indices, int start, int count) {
-    Matrix out(count, m.cols, 0.0f);
+// Copies selected feature rows into a preallocated serial batch.
+void gather_rows_inplace(
+    const Matrix& m,
+    const std::vector<int>& indices,
+    int start,
+    int count,
+    Matrix* out) {
+    if (out == nullptr) {
+        throw std::invalid_argument("gather_rows_inplace requires non-null output");
+    }
+    if (out->rows != count || out->cols != m.cols) {
+        throw std::invalid_argument("gather_rows_inplace output shape mismatch");
+    }
     for (int i = 0; i < count; ++i) {
         const int src = indices[static_cast<size_t>(start + i)];
+        const size_t dst_row = static_cast<size_t>(i) * static_cast<size_t>(out->cols);
+        const size_t src_row = static_cast<size_t>(src) * static_cast<size_t>(m.cols);
         for (int j = 0; j < m.cols; ++j) {
-            out.at(i, j) = m.at(src, j);
+            out->data[dst_row + static_cast<size_t>(j)] = m.data[src_row + static_cast<size_t>(j)];
         }
     }
-    return out;
 }
 
-// Copies selected labels into a contiguous serial batch.
-std::vector<int> gather_labels(
+// Copies selected labels into a preallocated serial batch.
+void gather_labels_inplace(
     const std::vector<int>& labels,
     const std::vector<int>& indices,
     int start,
-    int count) {
-    std::vector<int> out(static_cast<size_t>(count));
+    int count,
+    std::vector<int>* out) {
+    if (out == nullptr) {
+        throw std::invalid_argument("gather_labels_inplace requires non-null output");
+    }
+    out->resize(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i) {
-        out[static_cast<size_t>(i)] =
+        (*out)[static_cast<size_t>(i)] =
             labels[static_cast<size_t>(indices[static_cast<size_t>(start + i)])];
     }
-    return out;
 }
 
 // Runs one serial epoch including train loop and validation pass.
@@ -60,10 +74,11 @@ EpochMetrics run_serial_epoch(
     float running_loss = 0.0f;
     float running_acc = 0.0f;
     int steps = 0;
+    Matrix x_batch(config.batch_size, train.features.cols, 0.0f);
+    std::vector<int> y_batch(static_cast<size_t>(config.batch_size));
     for (int pos = 0; pos + config.batch_size <= train.features.rows; pos += config.batch_size) {
-        const Matrix x_batch = gather_rows(train.features, *epoch_indices, pos, config.batch_size);
-        const std::vector<int> y_batch =
-            gather_labels(train.labels, *epoch_indices, pos, config.batch_size);
+        gather_rows_inplace(train.features, *epoch_indices, pos, config.batch_size, &x_batch);
+        gather_labels_inplace(train.labels, *epoch_indices, pos, config.batch_size, &y_batch);
         const BatchMetrics train_metrics = model->train_batch(x_batch, y_batch, config.learning_rate);
         running_loss += train_metrics.loss;
         running_acc += train_metrics.accuracy;
@@ -74,8 +89,10 @@ EpochMetrics run_serial_epoch(
         throw std::runtime_error("No train steps executed; batch_size too large?");
     }
 
-    const BatchMetrics val_metrics = model->evaluate_batch(val.features, val.labels);
+    // Stop clock here — epoch_time_ms is training only, val eval excluded.
     const auto end = std::chrono::high_resolution_clock::now();
+
+    const BatchMetrics val_metrics = model->evaluate_batch(val.features, val.labels);
 
     EpochMetrics out;
     out.train_loss = running_loss / static_cast<float>(steps);

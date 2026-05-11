@@ -360,6 +360,32 @@ MPI_Request irecv_data(float* buf, int count, int src, int tag, MPI_Comm comm) {
     return req;
 }
 
+void gather_batch(
+    const Dataset& ds,
+    const std::vector<int>& epoch_indices,
+    int pos,
+    int batch_size,
+    Matrix* x_out,
+    std::vector<int>* y_out) {
+    if (x_out == nullptr || y_out == nullptr) {
+        throw std::invalid_argument("gather_batch requires non-null outputs");
+    }
+    if (x_out->rows != batch_size || x_out->cols != ds.features.cols) {
+        throw std::invalid_argument("gather_batch output matrix shape mismatch");
+    }
+    y_out->resize(static_cast<size_t>(batch_size));
+    for (int i = 0; i < batch_size; ++i) {
+        const int src = epoch_indices[static_cast<size_t>(pos + i)];
+        const size_t dst_row = static_cast<size_t>(i) * static_cast<size_t>(x_out->cols);
+        const size_t src_row = static_cast<size_t>(src) * static_cast<size_t>(ds.features.cols);
+        for (int j = 0; j < ds.features.cols; ++j) {
+            x_out->data[dst_row + static_cast<size_t>(j)] =
+                ds.features.data[src_row + static_cast<size_t>(j)];
+        }
+        (*y_out)[static_cast<size_t>(i)] = ds.labels[static_cast<size_t>(src)];
+    }
+}
+
 struct StepResult {
     float train_loss;
     float train_acc;
@@ -485,15 +511,19 @@ ValResult run_mp_eval(
     int world_size,
     MPI_Comm comm) {
     float sum_loss = 0.0f;
-    float sum_acc  = 0.0f;
-    int   steps    = 0;
+    float sum_acc = 0.0f;
+    int steps = 0;
+    Matrix x_batch(batch_size, val.features.cols, 0.0f);
+    std::vector<int> y_batch(static_cast<size_t>(batch_size));
 
     for (int pos = 0; pos + batch_size <= val.features.rows; pos += batch_size) {
-        Matrix x_batch(batch_size, val.features.cols, 0.0f);
-        std::vector<int> y_batch(static_cast<size_t>(batch_size));
         for (int i = 0; i < batch_size; ++i) {
+            const size_t dst_row = static_cast<size_t>(i) * static_cast<size_t>(x_batch.cols);
+            const size_t src_row =
+                static_cast<size_t>(pos + i) * static_cast<size_t>(val.features.cols);
             for (int j = 0; j < val.features.cols; ++j) {
-                x_batch.at(i, j) = val.features.at(pos + i, j);
+                x_batch.data[dst_row + static_cast<size_t>(j)] =
+                    val.features.data[src_row + static_cast<size_t>(j)];
             }
             y_batch[static_cast<size_t>(i)] = val.labels[static_cast<size_t>(pos + i)];
         }
@@ -557,13 +587,10 @@ EpochMetrics run_mp_epoch(
     int   steps    = 0;
 
     StepTimings epoch_timings;
+    Matrix x_batch(config.batch_size, train.features.cols, 0.0f);
+    std::vector<int> y_batch(static_cast<size_t>(config.batch_size));
 
-    for (int pos = 0;
-         pos + config.batch_size <= train.features.rows;
-         pos += config.batch_size) {
-
-        Matrix           x_batch;
-        std::vector<int> y_batch;
+    for (int pos = 0; pos + config.batch_size <= train.features.rows; pos += config.batch_size) {
         gather_batch(train, *epoch_indices, pos, config.batch_size, &x_batch, &y_batch);
 
         StepTimings step_timings;
@@ -582,12 +609,13 @@ EpochMetrics run_mp_epoch(
             "No training steps executed; check batch_size and dataset size");
     }
 
-    const ValResult vr = run_mp_eval(slice, val, config.batch_size, rank, world_size, comm);
-
+    // Stop clock here — epoch_time_ms is training only, val eval excluded.
     MPI_Barrier(comm);
     const auto wall_t1 = std::chrono::high_resolution_clock::now();
 
     print_epoch_timings(epoch_timings, rank, world_size, epoch, comm);
+
+    const ValResult vr = run_mp_eval(slice, val, config.batch_size, rank, world_size, comm);
 
     EpochMetrics out;
     out.train_loss    = sum_loss / static_cast<float>(steps);

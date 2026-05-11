@@ -35,8 +35,33 @@ public:
     void apply_gradients(const GradientBuffers& gradients, float learning_rate);
     BatchMetrics evaluate_batch(const Matrix& x, const std::vector<int>& y) const;
 
+    // Returns total number of weight + bias floats across all layers.
+    size_t weight_buffer_size() const;
+    // Copies all weights and biases into a caller-allocated flat buffer of size weight_buffer_size().
+    void pack_weights(float* buf) const;
+    // Overwrites all weights and biases from a flat buffer of size weight_buffer_size().
+    void unpack_weights(const float* buf);
+
 private:
+    struct Workspace {
+        int batch_rows = -1;
+        std::vector<Matrix> activations;
+        std::vector<Matrix> pre_activations;
+        Matrix probs;
+        Matrix grad;
+        Matrix grad_prev;
+        Matrix a_prev_t;
+        Matrix weight_t;
+        std::vector<float> ones;
+    };
+
+    void ensure_workspace(int batch_rows);
+    static void ensure_gradient_buffer_shapes(const std::vector<Layer>& layers, GradientBuffers* gradients);
+
+    std::vector<int> layer_sizes_;
     std::vector<Layer> layers_;
+    Workspace workspace_;
+    GradientBuffers train_gradients_;
 };
 
 }  // namespace nn

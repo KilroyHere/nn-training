@@ -11,6 +11,20 @@ namespace nn {
 namespace {
 
 extern "C" {
+void sgemm_(
+    const char* transa,
+    const char* transb,
+    const int* m,
+    const int* n,
+    const int* k,
+    const float* alpha,
+    const float* a,
+    const int* lda,
+    const float* b,
+    const int* ldb,
+    const float* beta,
+    float* c,
+    const int* ldc);
 void sgemv_(
     const char* trans,
     const int* m,
@@ -26,6 +40,73 @@ void sgemv_(
 void saxpy_(const int* n, const float* alpha, const float* x, const int* incx, float* y, const int* incy);
 }
 
+void ensure_matrix_shape(Matrix* m, int rows, int cols) {
+    if (m == nullptr) {
+        throw std::invalid_argument("ensure_matrix_shape requires non-null matrix");
+    }
+    if (m->rows != rows || m->cols != cols) {
+        m->rows = rows;
+        m->cols = cols;
+        m->data.resize(static_cast<size_t>(rows) * static_cast<size_t>(cols));
+    }
+}
+
+void matmul_into(const Matrix& a, const Matrix& b, Matrix* out) {
+    if (a.cols != b.rows) {
+        throw std::invalid_argument("matmul dimension mismatch");
+    }
+    ensure_matrix_shape(out, a.rows, b.cols);
+    const char trans_n = 'N';
+    const int m = b.cols;
+    const int n = a.rows;
+    const int k = a.cols;
+    const int lda = b.cols;
+    const int ldb = a.cols;
+    const int ldc = out->cols;
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    sgemm_(
+        &trans_n,
+        &trans_n,
+        &m,
+        &n,
+        &k,
+        &alpha,
+        b.data.data(),
+        &lda,
+        a.data.data(),
+        &ldb,
+        &beta,
+        out->data.data(),
+        &ldc);
+}
+
+void transpose_into(const Matrix& a, Matrix* out) {
+    ensure_matrix_shape(out, a.cols, a.rows);
+    for (int i = 0; i < a.rows; ++i) {
+        const size_t src_base = static_cast<size_t>(i) * static_cast<size_t>(a.cols);
+        for (int j = 0; j < a.cols; ++j) {
+            out->data[static_cast<size_t>(j) * static_cast<size_t>(out->cols) + static_cast<size_t>(i)] =
+                a.data[src_base + static_cast<size_t>(j)];
+        }
+    }
+}
+
+void relu_backward_inplace(Matrix* grad, const Matrix& pre_activation) {
+    if (grad == nullptr) {
+        throw std::invalid_argument("relu_backward_inplace requires non-null gradient");
+    }
+    if (grad->rows != pre_activation.rows || grad->cols != pre_activation.cols) {
+        throw std::invalid_argument("relu_backward dimension mismatch");
+    }
+    const size_t n = grad->data.size();
+    float* grad_ptr = grad->data.data();
+    const float* pre_ptr = pre_activation.data.data();
+    for (size_t i = 0; i < n; ++i) {
+        grad_ptr[i] = pre_ptr[i] > 0.0f ? grad_ptr[i] : 0.0f;
+    }
+}
+
 // Computes average cross-entropy loss and top-1 accuracy.
 BatchMetrics compute_metrics(const Matrix& probs, const std::vector<int>& y) {
     if (probs.rows != static_cast<int>(y.size())) {
@@ -34,15 +115,16 @@ BatchMetrics compute_metrics(const Matrix& probs, const std::vector<int>& y) {
     BatchMetrics m;
     int correct = 0;
     for (int i = 0; i < probs.rows; ++i) {
+        const float* row = probs.data.data() + static_cast<size_t>(i) * static_cast<size_t>(probs.cols);
         const int label = y[static_cast<size_t>(i)];
-        const float p = std::max(probs.at(i, label), 1e-8f);
+        const float p = std::max(row[label], 1e-8f);
         m.loss += -std::log(p);
 
         int pred = 0;
-        float best = -std::numeric_limits<float>::infinity();
-        for (int j = 0; j < probs.cols; ++j) {
-            if (probs.at(i, j) > best) {
-                best = probs.at(i, j);
+        float best = row[0];
+        for (int j = 1; j < probs.cols; ++j) {
+            if (row[j] > best) {
+                best = row[j];
                 pred = j;
             }
         }
@@ -63,6 +145,8 @@ MLP::MLP(const std::vector<int>& layer_sizes, std::mt19937& rng) {
     if (layer_sizes.size() < 2) {
         throw std::invalid_argument("MLP requires at least input and output layers");
     }
+    layer_sizes_ = layer_sizes;
+    layers_.reserve(layer_sizes.size() - 1);
     for (size_t i = 1; i < layer_sizes.size(); ++i) {
         const int in_dim = layer_sizes[i - 1];
         const int out_dim = layer_sizes[i];
@@ -72,6 +156,48 @@ MLP::MLP(const std::vector<int>& layer_sizes, std::mt19937& rng) {
         layer.weights = random_normal(in_dim, out_dim, stddev, rng);
         layer.bias = std::vector<float>(static_cast<size_t>(out_dim), 0.0f);
         layers_.push_back(std::move(layer));
+    }
+}
+
+void MLP::ensure_workspace(int batch_rows) {
+    if (batch_rows <= 0) {
+        throw std::invalid_argument("batch size must be positive");
+    }
+    if (workspace_.batch_rows == batch_rows &&
+        workspace_.activations.size() == layer_sizes_.size() &&
+        workspace_.pre_activations.size() + 1 == layer_sizes_.size()) {
+        return;
+    }
+
+    workspace_.batch_rows = batch_rows;
+    workspace_.activations.resize(layer_sizes_.size());
+    for (size_t i = 0; i < layer_sizes_.size(); ++i) {
+        ensure_matrix_shape(&workspace_.activations[i], batch_rows, layer_sizes_[i]);
+    }
+
+    workspace_.pre_activations.resize(layer_sizes_.size() - 1);
+    for (size_t i = 0; i + 1 < layer_sizes_.size(); ++i) {
+        ensure_matrix_shape(&workspace_.pre_activations[i], batch_rows, layer_sizes_[i + 1]);
+    }
+
+    ensure_matrix_shape(&workspace_.probs, batch_rows, layer_sizes_.back());
+    ensure_matrix_shape(&workspace_.grad, batch_rows, layer_sizes_.back());
+    ensure_matrix_shape(&workspace_.grad_prev, batch_rows, layer_sizes_.back());
+    workspace_.ones.assign(static_cast<size_t>(batch_rows), 1.0f);
+}
+
+void MLP::ensure_gradient_buffer_shapes(const std::vector<Layer>& layers, GradientBuffers* gradients) {
+    if (gradients == nullptr) {
+        throw std::invalid_argument("gradients must be non-null");
+    }
+    gradients->weight_grads.resize(layers.size());
+    gradients->bias_grads.resize(layers.size());
+    for (size_t i = 0; i < layers.size(); ++i) {
+        ensure_matrix_shape(
+            &gradients->weight_grads[i],
+            layers[i].weights.rows,
+            layers[i].weights.cols);
+        gradients->bias_grads[i].assign(layers[i].bias.size(), 0.0f);
     }
 }
 
@@ -98,81 +224,96 @@ BatchMetrics MLP::compute_batch_gradients(
     if (gradients == nullptr) {
         throw std::invalid_argument("compute_batch_gradients requires non-null gradients");
     }
-    std::vector<Matrix> activations;
-    std::vector<Matrix> pre_activations;
-    activations.reserve(layers_.size() + 1);
-    pre_activations.reserve(layers_.size());
-    activations.push_back(x);
+    if (x.rows != static_cast<int>(y.size())) {
+        throw std::invalid_argument("compute_batch_gradients x/y dimension mismatch");
+    }
+    if (x.cols != layer_sizes_.front()) {
+        throw std::invalid_argument("compute_batch_gradients input feature dimension mismatch");
+    }
 
+    ensure_workspace(x.rows);
+    ensure_gradient_buffer_shapes(layers_, gradients);
+
+    Matrix& input_activation = workspace_.activations[0];
+    std::copy(x.data.begin(), x.data.end(), input_activation.data.begin());
     for (size_t i = 0; i < layers_.size(); ++i) {
-        Matrix z = matmul(activations.back(), layers_[i].weights);
+        Matrix& z = workspace_.pre_activations[i];
+        matmul_into(workspace_.activations[i], layers_[i].weights, &z);
         add_row_vector(&z, layers_[i].bias);
-        pre_activations.push_back(z);
 
-        Matrix a = z;
+        Matrix& a = workspace_.activations[i + 1];
+        std::copy(z.data.begin(), z.data.end(), a.data.begin());
         if (i + 1 < layers_.size()) {
             relu_inplace(&a);
         }
-        activations.push_back(std::move(a));
     }
 
-    Matrix probs = softmax_rows(activations.back());
-    const BatchMetrics metrics = compute_metrics(probs, y);
+    const Matrix& logits = workspace_.activations.back();
+    for (int i = 0; i < logits.rows; ++i) {
+        const size_t row_base = static_cast<size_t>(i) * static_cast<size_t>(logits.cols);
+        float max_logit = -std::numeric_limits<float>::infinity();
+        for (int j = 0; j < logits.cols; ++j) {
+            max_logit = std::max(max_logit, logits.data[row_base + static_cast<size_t>(j)]);
+        }
+        float sum = 0.0f;
+        for (int j = 0; j < logits.cols; ++j) {
+            const float e = std::exp(logits.data[row_base + static_cast<size_t>(j)] - max_logit);
+            workspace_.probs.data[row_base + static_cast<size_t>(j)] = e;
+            sum += e;
+        }
+        const float inv = 1.0f / std::max(sum, 1e-12f);
+        for (int j = 0; j < logits.cols; ++j) {
+            workspace_.probs.data[row_base + static_cast<size_t>(j)] *= inv;
+        }
+    }
+    const BatchMetrics metrics = compute_metrics(workspace_.probs, y);
 
     const float inv_batch = 1.0f / static_cast<float>(x.rows);
-    for (int i = 0; i < probs.rows; ++i) {
+    for (int i = 0; i < workspace_.probs.rows; ++i) {
         const int label = y[static_cast<size_t>(i)];
-        probs.at(i, label) -= 1.0f;
+        workspace_.probs.data[static_cast<size_t>(i) * static_cast<size_t>(workspace_.probs.cols) +
+                             static_cast<size_t>(label)] -= 1.0f;
     }
-    for (float& v : probs.data) {
+    for (float& v : workspace_.probs.data) {
         v *= inv_batch;
     }
 
-    Matrix grad = std::move(probs);
-    gradients->weight_grads.clear();
-    gradients->bias_grads.clear();
-    gradients->weight_grads.resize(layers_.size());
-    gradients->bias_grads.resize(layers_.size());
+    workspace_.grad = workspace_.probs;
+    const char trans_n = 'N';
+    const int inc_reduce = 1;
+    const float alpha_reduce = 1.0f;
+    const float beta_reduce = 0.0f;
     for (int layer_idx = static_cast<int>(layers_.size()) - 1; layer_idx >= 0; --layer_idx) {
-        const Matrix a_prev_t = transpose(activations[static_cast<size_t>(layer_idx)]);
-        const Matrix grad_w = matmul(a_prev_t, grad);
-        std::vector<float> grad_b(
-            static_cast<size_t>(layers_[static_cast<size_t>(layer_idx)].bias.size()), 0.0f);
-        std::vector<float> ones(static_cast<size_t>(grad.rows), 1.0f);
-        const char trans_n = 'N';
-        const int m = grad.cols;
-        const int n = grad.rows;
-        const int lda = grad.cols;
-        const int inc_reduce = 1;
-        const float alpha_reduce = 1.0f;
-        const float beta_reduce = 0.0f;
+        transpose_into(workspace_.activations[static_cast<size_t>(layer_idx)], &workspace_.a_prev_t);
+        matmul_into(
+            workspace_.a_prev_t,
+            workspace_.grad,
+            &gradients->weight_grads[static_cast<size_t>(layer_idx)]);
+
+        std::vector<float>& grad_b = gradients->bias_grads[static_cast<size_t>(layer_idx)];
+        const int m = workspace_.grad.cols;
+        const int n = workspace_.grad.rows;
+        const int lda = workspace_.grad.cols;
         // grad is row-major [rows, cols], interpreted as col-major [cols, rows] = grad^T.
         sgemv_(
             &trans_n,
             &m,
             &n,
             &alpha_reduce,
-            grad.data.data(),
+            workspace_.grad.data.data(),
             &lda,
-            ones.data(),
+            workspace_.ones.data(),
             &inc_reduce,
             &beta_reduce,
             grad_b.data(),
             &inc_reduce);
 
-        Matrix grad_prev;
         if (layer_idx > 0) {
-            const Matrix wt = transpose(layers_[static_cast<size_t>(layer_idx)].weights);
-            grad_prev = matmul(grad, wt);
-            grad_prev = relu_backward(
-                grad_prev, pre_activations[static_cast<size_t>(layer_idx - 1)]);
-        }
-
-        gradients->weight_grads[static_cast<size_t>(layer_idx)] = grad_w;
-        gradients->bias_grads[static_cast<size_t>(layer_idx)] = grad_b;
-
-        if (layer_idx > 0) {
-            grad = std::move(grad_prev);
+            transpose_into(layers_[static_cast<size_t>(layer_idx)].weights, &workspace_.weight_t);
+            matmul_into(workspace_.grad, workspace_.weight_t, &workspace_.grad_prev);
+            relu_backward_inplace(
+                &workspace_.grad_prev, workspace_.pre_activations[static_cast<size_t>(layer_idx - 1)]);
+            std::swap(workspace_.grad, workspace_.grad_prev);
         }
     }
 
@@ -217,11 +358,39 @@ void MLP::apply_gradients(const GradientBuffers& gradients, float learning_rate)
     }
 }
 
+size_t MLP::weight_buffer_size() const {
+    size_t total = 0;
+    for (const Layer& l : layers_) {
+        total += l.weights.data.size();
+        total += l.bias.size();
+    }
+    return total;
+}
+
+void MLP::pack_weights(float* buf) const {
+    size_t offset = 0;
+    for (const Layer& l : layers_) {
+        std::copy(l.weights.data.begin(), l.weights.data.end(), buf + offset);
+        offset += l.weights.data.size();
+        std::copy(l.bias.begin(), l.bias.end(), buf + offset);
+        offset += l.bias.size();
+    }
+}
+
+void MLP::unpack_weights(const float* buf) {
+    size_t offset = 0;
+    for (Layer& l : layers_) {
+        std::copy(buf + offset, buf + offset + l.weights.data.size(), l.weights.data.begin());
+        offset += l.weights.data.size();
+        std::copy(buf + offset, buf + offset + l.bias.size(), l.bias.begin());
+        offset += l.bias.size();
+    }
+}
+
 // Convenience serial path: compute gradients and apply immediately.
 BatchMetrics MLP::train_batch(const Matrix& x, const std::vector<int>& y, float learning_rate) {
-    GradientBuffers gradients;
-    const BatchMetrics metrics = compute_batch_gradients(x, y, &gradients);
-    apply_gradients(gradients, learning_rate);
+    const BatchMetrics metrics = compute_batch_gradients(x, y, &train_gradients_);
+    apply_gradients(train_gradients_, learning_rate);
     return metrics;
 }
 
