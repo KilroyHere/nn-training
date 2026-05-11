@@ -1,0 +1,311 @@
+% ============================================================
+%  Final Project Report
+%  Course: [Your Course Name / Number]
+%  Deadline: May 13, midnight (AoE) — STRICT
+% ============================================================
+\documentclass[11pt]{article}
+
+% ----- Page layout -----
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}           % line-spacing helpers if needed
+
+% ----- Fonts & encoding -----
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+
+% ----- Math -----
+\usepackage{amsmath, amssymb, amsthm}
+
+% ----- Graphics & figures -----
+\usepackage{graphicx}
+\usepackage{subcaption}         % side-by-side subfigures
+\usepackage{float}              % [H] placement
+\usepackage{tikz}               % optional inline diagrams
+
+% ----- Tables -----
+\usepackage{booktabs}
+\usepackage{multirow}
+
+% ----- Code listings -----
+\usepackage{listings}
+\usepackage{xcolor}
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{teal},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  frame=single,
+  breaklines=true,
+  captionpos=b
+}
+
+% ----- Hyperlinks -----
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+% ----- Bibliography -----
+\usepackage{natbib}             % \citep / \citet style; swap for biblatex if preferred
+
+% ----- Miscellaneous -----
+\usepackage{microtype}          % better justification
+\usepackage{enumitem}           % compact lists
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% ============================================================
+%  Title block
+% ============================================================
+\title{
+  \textbf{[Project Title]} \\[4pt]
+  \large Final Project Report
+}
+
+\author{
+  Author One\thanks{Equal contribution.} \quad
+  Author Two$^*$ \quad
+  Author Three \\[2pt]
+  \textit{[Course Name \& Number, Institution]}
+}
+
+\date{May 2026}
+
+% ============================================================
+\begin{document}
+\maketitle
+
+% GitHub repo — required by submission guidelines
+\begin{center}
+  \textbf{GitHub Repository:}
+  \href{https://github.com/your-org/your-repo}{\texttt{github.com/your-org/your-repo}}
+\end{center}
+
+\begin{abstract}
+  % 150–200 words. Restate the core hypothesis, the approach, and the
+  % headline result. Write this last.
+  TODO: one paragraph summarising the hypothesis, the method, and the
+  main finding.
+\end{abstract}
+
+% ============================================================
+\section{Hypothesis}
+\label{sec:hypothesis}
+% ---------------------------------------------------------------
+% State the question you want to investigate.
+% What did you expect to find, and what did you actually find?
+% ---------------------------------------------------------------
+
+We investigate \textbf{[research question]}. Specifically, we hypothesize
+that \textit{[your hypothesis]}. Our experiments show that
+\textit{[brief summary of result]}.
+
+% ============================================================
+\section{Context}
+\label{sec:context}
+% ---------------------------------------------------------------
+% • Main contribution of each member.
+% • Is this a sub-project of a larger research project?
+% • Could variants be used in other courses?
+% ---------------------------------------------------------------
+
+\paragraph{Member contributions.}
+\begin{itemize}[nosep]
+  \item \textbf{Author One:} TODO (e.g., designed the parallel algorithm,
+        implemented CUDA kernel).
+  \item \textbf{Author Two:} TODO (e.g., conducted performance experiments,
+        produced plots).
+  \item \textbf{Author Three:} TODO (e.g., literature review, theoretical
+        analysis).
+\end{itemize}
+
+\paragraph{Broader context.}
+This project \textit{[is / is not]} part of a larger research effort.
+TODO: one sentence about the research group or application domain if
+applicable.
+
+\paragraph{Applicability to other courses.}
+Variants of this project could be applied in \textit{[e.g.,
+high-performance computing, machine learning systems, etc.]} courses
+because TODO.
+
+% ============================================================
+\section{Prior Work}
+\label{sec:prior}
+% ---------------------------------------------------------------
+% ~3 previous works this project builds on, is motivated by,
+% or will be compared against.
+% ---------------------------------------------------------------
+
+\paragraph{Work 1.}
+\citet{ref1} introduced TODO. We build on their approach by TODO.
+
+\paragraph{Work 2.}
+\citet{ref2} proposed TODO. Our implementation differs in that TODO.
+
+\paragraph{Work 3.}
+\citet{ref3} demonstrated TODO. We compare against their results
+in Section~\ref{sec:methodology}.
+
+% ============================================================
+\section{Empirical Methodology}
+\label{sec:methodology}
+% ---------------------------------------------------------------
+% LARGEST SECTION — target ≥ 5 pages.
+% Focus on PARALLELISM, not the problem description.
+% Figures and plots encouraged (≤ 1 page total of figures).
+% Sub-sections suggested below; rename / add as appropriate.
+% ---------------------------------------------------------------
+
+\subsection{Problem Setup}
+TODO: brief restatement of the computational problem (keep short;
+the focus is on parallelism).
+
+\subsection{Sequential Baseline}
+\label{sec:baseline}
+TODO: describe the sequential algorithm and any existing baseline
+you compare against.
+
+\subsection{Parallel Design}
+\label{sec:parallel-design}
+TODO: describe the parallel algorithm or system design.
+Explain the \textbf{parallelism strategy}:
+work decomposition, communication pattern, synchronisation points, etc.
+
+\begin{algorithm}[H]
+\caption{TODO: your parallel algorithm}
+\label{alg:main}
+\begin{algorithmic}[1]
+  \Require input $X$, number of threads $p$
+  \Ensure output $Y$
+  \State TODO
+  \ParFor{each chunk $c$ in $X$}     % example parallel loop
+    \State TODO
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Implementation}
+\label{sec:impl}
+TODO: language, framework (e.g., OpenMP, MPI, CUDA, Spark),
+key optimisations (vectorisation, tiling, load balancing, etc.).
+
+% --- Optional code snippet ---
+% \begin{lstlisting}[language=C++, caption={Key parallel loop.}]
+% #pragma omp parallel for schedule(dynamic)
+% for (int i = 0; i < n; i++) { ... }
+% \end{lstlisting}
+
+\subsection{Experimental Setup}
+\label{sec:setup}
+TODO: hardware (CPU model, core count, memory; GPU if applicable),
+software versions, dataset sizes, how you measured time.
+
+\begin{table}[H]
+\centering
+\caption{Hardware and software configuration.}
+\label{tab:setup}
+\begin{tabular}{ll}
+\toprule
+\textbf{Component} & \textbf{Specification} \\
+\midrule
+CPU & TODO \\
+Cores / Threads & TODO \\
+Memory & TODO \\
+Compiler / Runtime & TODO \\
+OS & TODO \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Results}
+\label{sec:results}
+
+\subsubsection{Scaling Analysis}
+
+% --- Speedup figure ---
+\begin{figure}[H]
+  \centering
+  % Replace with your actual plot file.
+  % \includegraphics[width=0.6\linewidth]{figures/speedup.pdf}
+  \fbox{\rule{0pt}{4cm}\rule{0.6\linewidth}{0pt}} % placeholder
+  \caption{Speedup vs.\ number of threads/processes for input size TODO.
+           Dashed line shows ideal linear speedup.}
+  \label{fig:speedup}
+\end{figure}
+
+TODO: explain Figure~\ref{fig:speedup}. Report peak speedup, identify
+the bottleneck (Amdahl fraction, memory bandwidth, etc.).
+
+\subsubsection{Strong Scaling}
+
+TODO: fix problem size, vary $p$. Report efficiency
+$E(p) = S(p)/p$ at each configuration.
+
+\begin{table}[H]
+\centering
+\caption{Strong scaling results (input size $N = $ TODO).}
+\label{tab:strong}
+\begin{tabular}{rrrr}
+\toprule
+\textbf{Threads ($p$)} & \textbf{Time (s)} & \textbf{Speedup $S(p)$} & \textbf{Efficiency $E(p)$} \\
+\midrule
+1  & TODO & 1.00$\times$ & 100\% \\
+2  & TODO & TODO & TODO \\
+4  & TODO & TODO & TODO \\
+8  & TODO & TODO & TODO \\
+16 & TODO & TODO & TODO \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Weak Scaling}
+TODO: scale both $N$ and $p$ proportionally. Report whether runtime
+stays roughly constant.
+
+\subsubsection{Additional Results}
+TODO: interesting inputs, output quality, accuracy vs.\ baseline,
+profiling breakdown (compute vs.\ memory vs.\ communication), etc.
+
+% ============================================================
+\section{Challenges and Obstacles}
+\label{sec:challenges}
+% ---------------------------------------------------------------
+% Obstacles encountered.
+% Hypotheses for things that did not work as expected.
+% ---------------------------------------------------------------
+
+\paragraph{[Challenge 1].} TODO: describe what you tried, what
+happened, and your hypothesis for why.
+
+\paragraph{[Challenge 2].} TODO.
+
+\paragraph{[Challenge 3].} TODO.
+
+% ============================================================
+% Bibliography
+% ============================================================
+\bibliographystyle{plainnat}
+\bibliography{references}   % reads references.bib
+
+% If you prefer inline bibliography, uncomment the block below
+% and remove the two lines above.
+%
+% \begin{thebibliography}{9}
+% \bibitem{ref1}
+%   Author A, Author B.
+%   \textit{Title of paper 1}.
+%   Venue, Year.
+% \bibitem{ref2}
+%   TODO
+% \bibitem{ref3}
+%   TODO
+% \end{thebibliography}
+
+\end{document}
