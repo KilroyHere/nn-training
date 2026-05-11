@@ -165,7 +165,7 @@ We study parallel training of a feed-forward MLP on MNIST with a fixed
 optimization setup and matched data split across implementations. The
 primary model for scaling is
 $784 \rightarrow 256 \rightarrow 128 \rightarrow 64 \rightarrow 10$,
-trained with SGD and cross-entropy. The project compares four execution
+trained with SGD and cross-entropy. The project compares five execution
 modes:
 \begin{itemize}[nosep]
   \item \textbf{Serial}: single-process baseline.
@@ -174,9 +174,9 @@ modes:
   \item \textbf{Hierarchical MPI DP}: per-step gradient synchronization split into
         intra-node reduce, inter-node all-reduce (leaders), and intra-node broadcast.
   \item \textbf{Local SGD}: each rank performs local SGD and averages weights every $K$ steps.
+  \item \textbf{Model Parallel (MP)}: layers are partitioned across ranks and
+        activations/gradients are exchanged between neighboring partitions.
 \end{itemize}
-Model-parallel MPI is implemented as a separate backend and is evaluated
-separately because its decomposition objective differs from DP scaling.
 
 \subsection{Sequential Baseline}
 \label{sec:baseline}
@@ -232,7 +232,18 @@ report). This trades statistical freshness for lower communication frequency.
 
 \paragraph{Model Parallel (MP).}
 Layers are partitioned across ranks. Forward activations and backward gradients
-are exchanged via point-to-point MPI between adjacent layer partitions.
+are exchanged via point-to-point MPI between adjacent layer partitions. In
+this report, MP is treated as a first-class method in the main project (not an
+auxiliary baseline). We currently evaluate a non-pipelined schedule, and we
+reserve explicit placeholders for pipelined MP variants:
+\begin{itemize}[nosep]
+  \item \textbf{Pipeline placeholder A (inference-style fill/drain):}
+        TODO add timeline and throughput model for micro-batch pipeline.
+  \item \textbf{Pipeline placeholder B (1F1B schedule):}
+        TODO add 1F1B warmup/steady/cooldown schedule and bubble analysis.
+  \item \textbf{Pipeline placeholder C (interleaved virtual stages):}
+        TODO add interleaved stage assignment and expected memory trade-offs.
+\end{itemize}
 
 \begin{algorithm}[H]
 \caption{Data-parallel epoch (flat DP / hierarchical DP / local SGD)}
@@ -256,7 +267,7 @@ are exchanged via point-to-point MPI between adjacent layer partitions.
 \end{algorithm}
 
 \begin{algorithm}[H]
-\caption{Model-parallel epoch (layer-partitioned)}
+\caption{Model-parallel epoch (current non-pipelined schedule + pipeline placeholders)}
 \label{alg:mp}
 \begin{algorithmic}[1]
   \Require layer partition per rank, batch size $B$
@@ -279,6 +290,10 @@ are exchanged via point-to-point MPI between adjacent layer partitions.
     \EndIf
     \State apply local SGD update to local layers
   \EndFor
+  \State \textbf{Pipeline extension placeholder:}
+  \Statex \hspace{\algorithmicindent} TODO replace batch-level loop with micro-batch schedule.
+  \Statex \hspace{\algorithmicindent} TODO evaluate GPipe-style fill/drain vs 1F1B.
+  \Statex \hspace{\algorithmicindent} TODO report pipeline bubble fraction and overlap efficiency.
 \end{algorithmic}
 \end{algorithm}
 
