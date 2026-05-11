@@ -117,18 +117,72 @@ struct LayerRange {
     int end;
 };
 
-LayerRange compute_layer_range(int num_layers, int rank, int world_size) {
+std::vector<long long> compute_layer_costs(const std::vector<int>& layer_sizes) {
+    std::vector<long long> costs;
+    for (size_t i = 0; i < layer_sizes.size() - 1; ++i) {
+        costs.push_back(static_cast<long long>(layer_sizes[i]) * layer_sizes[i + 1]);
+    }
+    return costs;
+}
+
+// LayerRange compute_layer_range(int num_layers, int rank, int world_size) {
+//     if (num_layers < world_size) {
+//         throw std::invalid_argument(
+//             "num_layers (" + std::to_string(num_layers) + ") < world_size (" +
+//             std::to_string(world_size) + "): cannot assign at least one layer per rank");
+//     }
+//     const int base = num_layers / world_size;
+//     const int remainder = num_layers % world_size;
+//     LayerRange r;
+//     r.start = rank * base + std::min(rank, remainder);
+//     r.end = r.start + base + (rank < remainder ? 1 : 0);
+//     return r;
+// }
+
+LayerRange compute_layer_range_balanced(
+    const std::vector<int>& layer_sizes, 
+    int rank, 
+    int world_size) {
+    
+    int num_layers = static_cast<int>(layer_sizes.size()) - 1;
     if (num_layers < world_size) {
         throw std::invalid_argument(
             "num_layers (" + std::to_string(num_layers) + ") < world_size (" +
             std::to_string(world_size) + "): cannot assign at least one layer per rank");
     }
-    const int base = num_layers / world_size;
-    const int remainder = num_layers % world_size;
-    LayerRange r;
-    r.start = rank * base + std::min(rank, remainder);
-    r.end = r.start + base + (rank < remainder ? 1 : 0);
-    return r;
+
+    std::vector<long long> costs = compute_layer_costs(layer_sizes);
+    long long total_cost = std::accumulate(costs.begin(), costs.end(), 0LL);
+    long long target_cost_per_rank = total_cost / world_size;
+
+    std::vector<LayerRange> ranges(world_size);
+    int current_layer = 0;
+
+    for (int r = 0; r < world_size; ++r) {
+        ranges[r].start = current_layer;
+        long long current_rank_cost = 0;
+
+        while (current_layer < num_layers) {
+            int layers_left = num_layers - current_layer;
+            int ranks_left = world_size - r;
+        
+            if (layers_left <= ranks_left && current_layer > ranges[r].start) {
+                break; 
+            }
+
+            current_rank_cost += costs[current_layer];
+            current_layer++;
+
+            if (current_rank_cost >= target_cost_per_rank && r < world_size - 1) {
+                break;
+            }
+        }
+        ranges[r].end = current_layer;
+    }
+
+    ranges[world_size - 1].end = num_layers;
+
+    return ranges[rank];
 }
 
 struct LocalMetrics {
@@ -784,7 +838,7 @@ int run_mpi_model_parallel_pipeline(
                 "batch_size must be divisible by microbatch_count for pipeline parallelism");
         }
 
-        const LayerRange range = compute_layer_range(num_layers, rank, world_size);
+        const LayerRange range = compute_layer_range_balanced(layer_sizes, rank, world_size);
         const bool is_last_rank = (rank == world_size - 1);
 
         std::mt19937 rng(config.seed);
