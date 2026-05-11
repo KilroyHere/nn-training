@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <mpi.h>
@@ -20,97 +19,6 @@
 namespace nn {
 
 namespace {
-
-struct PipelineTimings {
-    double fwd_comm_s    = 0.0;
-    double fwd_compute_s = 0.0;
-    double fwd_send_s    = 0.0;
-    double bwd_comm_s    = 0.0;
-    double bwd_compute_s = 0.0;
-    double grad_accum_s  = 0.0;
-    double grad_apply_s  = 0.0;
-    double bwd_send_s    = 0.0;
-
-    static constexpr int N_FIELDS = 8;
-
-    void pack(double* buf) const {
-        buf[0] = fwd_comm_s;
-        buf[1] = fwd_compute_s;
-        buf[2] = fwd_send_s;
-        buf[3] = bwd_comm_s;
-        buf[4] = bwd_compute_s;
-        buf[5] = grad_accum_s;
-        buf[6] = grad_apply_s;
-        buf[7] = bwd_send_s;
-    }
-
-    void accumulate(const PipelineTimings& o) {
-        fwd_comm_s    += o.fwd_comm_s;
-        fwd_compute_s += o.fwd_compute_s;
-        fwd_send_s    += o.fwd_send_s;
-        bwd_comm_s    += o.bwd_comm_s;
-        bwd_compute_s += o.bwd_compute_s;
-        grad_accum_s  += o.grad_accum_s;
-        grad_apply_s  += o.grad_apply_s;
-        bwd_send_s    += o.bwd_send_s;
-    }
-};
-
-void print_epoch_timings(
-    const PipelineTimings& local,
-    int rank,
-    int world_size,
-    int epoch,
-    MPI_Comm comm) {
-
-    double local_buf[PipelineTimings::N_FIELDS];
-    local.pack(local_buf);
-
-    std::vector<double> all_buf;
-    if (rank == 0) {
-        all_buf.resize(static_cast<size_t>(world_size * PipelineTimings::N_FIELDS), 0.0);
-    }
-
-    MPI_Gather(
-        local_buf, PipelineTimings::N_FIELDS, MPI_DOUBLE,
-        rank == 0 ? all_buf.data() : nullptr, PipelineTimings::N_FIELDS, MPI_DOUBLE,
-        0, comm);
-
-    if (rank != 0) return;
-
-    static const char* labels[PipelineTimings::N_FIELDS] = {
-        "fwd_comm   ",
-        "fwd_compute",
-        "fwd_send   ",
-        "bwd_comm   ",
-        "bwd_compute",
-        "grad_accum ",
-        "grad_apply ",
-        "bwd_send   ",
-    };
-
-    std::cout << "[mpi-mp-pip] epoch " << epoch
-              << " timings (s, epoch total) - min / mean / max across "
-              << world_size << " ranks:\n";
-
-    std::cout << std::fixed << std::setprecision(4);
-    for (int f = 0; f < PipelineTimings::N_FIELDS; ++f) {
-        double mn  =  std::numeric_limits<double>::max();
-        double mx  = -std::numeric_limits<double>::max();
-        double sum = 0.0;
-        for (int r = 0; r < world_size; ++r) {
-            const double v = all_buf[static_cast<size_t>(r * PipelineTimings::N_FIELDS + f)];
-            mn  = std::min(mn,  v);
-            mx  = std::max(mx,  v);
-            sum += v;
-        }
-        std::cout << "  " << labels[f] << "  "
-                  << std::setw(8) << mn  << " / "
-                  << std::setw(8) << (sum / static_cast<double>(world_size)) << " / "
-                  << std::setw(8) << mx  << "\n";
-    }
-    std::cout << std::flush;
-}
 
 struct LayerRange {
     int start;
@@ -145,6 +53,7 @@ LocalMetrics compute_local_metrics(const Matrix& probs, const std::vector<int>& 
     for (int i = 0; i < probs.rows; ++i) {
         const int label = y[static_cast<size_t>(i)];
         m.loss += -std::log(std::max(probs.at(i, label), 1e-8f));
+
         int pred = 0;
         float best = -std::numeric_limits<float>::infinity();
         for (int j = 0; j < probs.cols; ++j) {
@@ -153,7 +62,9 @@ LocalMetrics compute_local_metrics(const Matrix& probs, const std::vector<int>& 
                 pred = j;
             }
         }
-        if (pred == label) ++correct;
+        if (pred == label) {
+            ++correct;
+        }
     }
     m.loss /= static_cast<float>(probs.rows);
     m.accuracy = static_cast<float>(correct) / static_cast<float>(probs.rows);
@@ -187,6 +98,7 @@ public:
             const int out_dim = layer_sizes[static_cast<size_t>(i + 1)];
             random_normal(in_dim, out_dim, std::sqrt(2.0f / static_cast<float>(in_dim)), rng);
         }
+
         for (int i = range.start; i < range.end; ++i) {
             const int in_dim = layer_sizes[static_cast<size_t>(i)];
             const int out_dim = layer_sizes[static_cast<size_t>(i + 1)];
@@ -196,6 +108,7 @@ public:
             layer.bias = std::vector<float>(static_cast<size_t>(out_dim), 0.0f);
             layers_.push_back(std::move(layer));
         }
+
         for (int i = range.end; i < total_layers; ++i) {
             const int in_dim = layer_sizes[static_cast<size_t>(i)];
             const int out_dim = layer_sizes[static_cast<size_t>(i + 1)];
@@ -219,7 +132,9 @@ public:
             Matrix z = matmul(a, layers_[i].weights);
             add_row_vector(&z, layers_[i].bias);
             state.pre_activations.push_back(z);
-            if (!(is_last_ && i + 1 == layers_.size())) {
+            if (is_last_ && i + 1 == layers_.size()) {
+                // pass
+            } else {
                 relu_inplace(&z);
             }
             a = std::move(z);
@@ -245,9 +160,12 @@ public:
 
         const float inv_batch = 1.0f / static_cast<float>(probs.rows);
         for (int i = 0; i < probs.rows; ++i) {
-            probs.at(i, y[static_cast<size_t>(i)]) -= 1.0f;
+            const int label = y[static_cast<size_t>(i)];
+            probs.at(i, label) -= 1.0f;
         }
-        for (float& v : probs.data) v *= inv_batch;
+        for (float& v : probs.data) {
+            v *= inv_batch;
+        }
 
         return backward_from_zgrad(probs, state, grad_to_prev);
     }
@@ -301,10 +219,9 @@ public:
     }
 
 private:
-    GradientBuffers backward_from_zgrad(
-        const Matrix& initial_grad,
-        const ForwardState& state,
-        Matrix* grad_to_prev) {
+    GradientBuffers backward_from_zgrad(const Matrix& initial_grad,
+                                        const ForwardState& state,
+                                        Matrix* grad_to_prev) {
         GradientBuffers grads;
         const size_t n = layers_.size();
         grads.weight_grads.resize(n);
@@ -325,19 +242,14 @@ private:
 
             if (li == 0) {
                 if (grad_to_prev != nullptr) {
-                    *grad_to_prev = matmul(
-                        grad,
-                        transpose(layers_[static_cast<size_t>(li)].weights));
+                    const Matrix grad_prev = matmul(grad, transpose(layers_[static_cast<size_t>(li)].weights));
+                    *grad_to_prev = std::move(grad_prev);
                 }
                 break;
             }
 
-            const Matrix grad_prev = matmul(
-                grad,
-                transpose(layers_[static_cast<size_t>(li)].weights));
-            grad = relu_backward(
-                grad_prev,
-                state.pre_activations[static_cast<size_t>(li - 1)]);
+            const Matrix grad_prev = matmul(grad, transpose(layers_[static_cast<size_t>(li)].weights));
+            grad = relu_backward(grad_prev, state.pre_activations[static_cast<size_t>(li - 1)]);
         }
         return grads;
     }
@@ -351,6 +263,32 @@ private:
 
 constexpr int TAG_FWD = 0;
 constexpr int TAG_BWD = 1;
+
+void send_activation_nonblocking(const Matrix& a, int dest, MPI_Comm comm, MPI_Request* request) {
+    const int dims[2] = {a.rows, a.cols};
+    MPI_Send(dims, 2, MPI_INT, dest, TAG_FWD, comm);
+    MPI_Isend(a.data.data(), static_cast<int>(a.data.size()), MPI_FLOAT, dest, TAG_FWD, comm, request);
+}
+
+Matrix recv_activation_blocking(int src, MPI_Comm comm) {
+    int dims[2] = {0, 0};
+    MPI_Recv(dims, 2, MPI_INT, src, TAG_FWD, comm, MPI_STATUS_IGNORE);
+    Matrix a(dims[0], dims[1], 0.0f);
+    MPI_Recv(a.data.data(), static_cast<int>(a.data.size()), MPI_FLOAT, src, TAG_FWD, comm, MPI_STATUS_IGNORE);
+    return a;
+}
+
+MPI_Request send_gradient_nonblocking(const Matrix& g, int dest, MPI_Comm comm) {
+    MPI_Request req = MPI_REQUEST_NULL;
+    MPI_Isend(g.data.data(), static_cast<int>(g.data.size()), MPI_FLOAT, dest, TAG_BWD, comm, &req);
+    return req;
+}
+
+Matrix recv_gradient_blocking(int rows, int cols, int src, MPI_Comm comm) {
+    Matrix g(rows, cols, 0.0f);
+    MPI_Recv(g.data.data(), static_cast<int>(g.data.size()), MPI_FLOAT, src, TAG_BWD, comm, MPI_STATUS_IGNORE);
+    return g;
+}
 
 void accumulate_gradients(GradientBuffers* accum, const GradientBuffers& grad) {
     if (accum->weight_grads.size() != grad.weight_grads.size() ||
@@ -377,6 +315,40 @@ void accumulate_gradients(GradientBuffers* accum, const GradientBuffers& grad) {
     }
 }
 
+void split_batch_into_microbatches(
+    const Matrix& x_batch,
+    const std::vector<int>& y_batch,
+    int microbatch_count,
+    std::vector<Matrix>* x_microbatches,
+    std::vector<std::vector<int>>* y_microbatches) {
+    if (microbatch_count <= 0) {
+        throw std::invalid_argument("microbatch_count must be positive");
+    }
+    if (x_batch.rows % microbatch_count != 0) {
+        throw std::invalid_argument("Batch size must be divisible by microbatch_count");
+    }
+    const int microbatch_size = x_batch.rows / microbatch_count;
+    x_microbatches->assign(static_cast<size_t>(microbatch_count), Matrix(microbatch_size, x_batch.cols));
+    y_microbatches->assign(static_cast<size_t>(microbatch_count), std::vector<int>(static_cast<size_t>(microbatch_size)));
+    for (int mb = 0; mb < microbatch_count; ++mb) {
+        for (int i = 0; i < microbatch_size; ++i) {
+            const int row = mb * microbatch_size + i;
+            for (int j = 0; j < x_batch.cols; ++j) {
+                x_microbatches->at(static_cast<size_t>(mb)).at(i, j) = x_batch.at(row, j);
+            }
+            (*y_microbatches)[static_cast<size_t>(mb)][static_cast<size_t>(i)] = y_batch[static_cast<size_t>(row)];
+        }
+    }
+}
+
+struct MicrobatchSlot {
+    ForwardState forward_state;
+    std::vector<int> labels;
+    MPI_Request fwd_send_req = MPI_REQUEST_NULL;
+    MPI_Request bwd_send_req = MPI_REQUEST_NULL;
+    Matrix grad_to_prev;
+};
+
 struct StepResult {
     float train_loss;
     float train_acc;
@@ -384,55 +356,35 @@ struct StepResult {
 
 StepResult run_mp_pipeline_batch(
     MPLayerSlice* slice,
-    const std::vector<Matrix>& x_microbatches,
-    const std::vector<std::vector<int>>& y_microbatches,
+    const Matrix& x_batch,
+    const std::vector<int>& y_batch,
     int microbatch_count,
-    int microbatch_size,
     float learning_rate,
     int rank,
     int world_size,
-    MPI_Comm comm,
-    PipelineTimings* timings) {
-
+    MPI_Comm comm) {
     if (slice == nullptr) {
         throw std::invalid_argument("slice cannot be null");
+    }
+    if (x_batch.rows != static_cast<int>(y_batch.size())) {
+        throw std::invalid_argument("Input batch and label batch size mismatch");
     }
     if (microbatch_count <= 0) {
         throw std::invalid_argument("microbatch_count must be positive");
     }
-
-    double t0, t1;
-
-    Matrix fwd_buf[2] = {
-        Matrix(microbatch_size, slice->input_dim(), 0.0f),
-        Matrix(microbatch_size, slice->input_dim(), 0.0f)
-    };
-    Matrix bwd_buf[2] = {
-        Matrix(microbatch_size, slice->output_dim(), 0.0f),
-        Matrix(microbatch_size, slice->output_dim(), 0.0f)
-    };
-    int fwd_buf_idx = 0;
-    int bwd_buf_idx = 0;
-    MPI_Request fwd_recv_req = MPI_REQUEST_NULL;
-    MPI_Request bwd_recv_req = MPI_REQUEST_NULL;
-
-    if (!slice->is_first()) {
-        MPI_Irecv(fwd_buf[fwd_buf_idx].data.data(),
-                  static_cast<int>(fwd_buf[fwd_buf_idx].data.size()),
-                  MPI_FLOAT, rank - 1, TAG_FWD, comm, &fwd_recv_req);
+    if (x_batch.rows % microbatch_count != 0) {
+        throw std::invalid_argument("Batch size must be divisible by microbatch_count");
     }
-    if (!slice->is_last()) {
-        MPI_Irecv(bwd_buf[bwd_buf_idx].data.data(),
-                  static_cast<int>(bwd_buf[bwd_buf_idx].data.size()),
-                  MPI_FLOAT, rank + 1, TAG_BWD, comm, &bwd_recv_req);
-    }
+
+    const int microbatch_size = x_batch.rows / microbatch_count;
+    std::vector<Matrix> x_microbatches;
+    std::vector<std::vector<int>> y_microbatches;
+    split_batch_into_microbatches(x_batch, y_batch, microbatch_count, &x_microbatches, &y_microbatches);
 
     struct PipelineSlot {
-        ForwardState forward_state;
-        std::vector<int> labels;
-        MPI_Request fwd_send_req = MPI_REQUEST_NULL;
-        MPI_Request bwd_send_req = MPI_REQUEST_NULL;
-        Matrix grad_to_prev;
+        MicrobatchSlot data;
+        bool has_forward = false;
+        bool has_backward = false;
     };
 
     std::vector<PipelineSlot> slots(static_cast<size_t>(microbatch_count));
@@ -446,51 +398,23 @@ StepResult run_mp_pipeline_batch(
         const int forward_index = step;
         const int backward_index = step - (world_size - 1);
 
-        // --- Forward pass ---
         if (forward_index < microbatch_count) {
-            const Matrix* input_ptr = nullptr;
-
+            Matrix local_input;
             if (!slice->is_first()) {
-                t0 = MPI_Wtime();
-                MPI_Wait(&fwd_recv_req, MPI_STATUS_IGNORE);
-                t1 = MPI_Wtime();
-                if (timings) timings->fwd_comm_s += t1 - t0;
-
-                const int use_idx = fwd_buf_idx;
-                fwd_buf_idx = 1 - fwd_buf_idx;
-
-                if (forward_index + 1 < microbatch_count) {
-                    MPI_Irecv(fwd_buf[fwd_buf_idx].data.data(),
-                              static_cast<int>(fwd_buf[fwd_buf_idx].data.size()),
-                              MPI_FLOAT, rank - 1, TAG_FWD, comm, &fwd_recv_req);
-                }
-                input_ptr = &fwd_buf[use_idx];
+                local_input = recv_activation_blocking(rank - 1, comm);
             } else {
-                input_ptr = &x_microbatches[static_cast<size_t>(forward_index)];
+                local_input = x_microbatches[static_cast<size_t>(forward_index)];
             }
-
-            t0 = MPI_Wtime();
-            slots[static_cast<size_t>(forward_index)].forward_state =
-                slice->forward_state(*input_ptr);
-            t1 = MPI_Wtime();
-            if (timings) timings->fwd_compute_s += t1 - t0;
-
-            if (slice->is_last()) {
-                slots[static_cast<size_t>(forward_index)].labels =
-                    y_microbatches[static_cast<size_t>(forward_index)];
-            }
-
+            slots[static_cast<size_t>(forward_index)].data.forward_state = slice->forward_state(local_input);
+            slots[static_cast<size_t>(forward_index)].has_forward = true;
             if (!slice->is_last()) {
-                const Matrix& out =
-                    slots[static_cast<size_t>(forward_index)].forward_state.activations.back();
-                MPI_Isend(out.data.data(),
-                          static_cast<int>(out.data.size()),
-                          MPI_FLOAT, rank + 1, TAG_FWD, comm,
-                          &slots[static_cast<size_t>(forward_index)].fwd_send_req);
+                const Matrix& local_output = slots[static_cast<size_t>(forward_index)].data.forward_state.activations.back();
+                send_activation_nonblocking(local_output, rank + 1, comm,
+                                           &slots[static_cast<size_t>(forward_index)].data.fwd_send_req);
             }
+            slots[static_cast<size_t>(forward_index)].data.labels = std::move(y_microbatches[static_cast<size_t>(forward_index)]);
         }
 
-        // --- Backward pass ---
         if (backward_index >= 0 && backward_index < microbatch_count) {
             const int mb = backward_index;
             GradientBuffers grads;
@@ -498,85 +422,45 @@ StepResult run_mp_pipeline_batch(
             LocalMetrics metrics;
 
             if (slice->is_last()) {
-                t0 = MPI_Wtime();
                 grads = slice->backward_last(
-                    slots[static_cast<size_t>(mb)].labels,
-                    slots[static_cast<size_t>(mb)].forward_state,
+                    slots[static_cast<size_t>(mb)].data.labels,
+                    slots[static_cast<size_t>(mb)].data.forward_state,
                     slice->is_first() ? nullptr : &grad_to_prev,
                     &metrics);
-                t1 = MPI_Wtime();
-                if (timings) timings->bwd_compute_s += t1 - t0;
-
                 sum_loss += metrics.loss;
                 sum_acc += metrics.accuracy;
                 ++weight;
             } else {
-                t0 = MPI_Wtime();
-                MPI_Wait(&bwd_recv_req, MPI_STATUS_IGNORE);
-                t1 = MPI_Wtime();
-                if (timings) timings->bwd_comm_s += t1 - t0;
-
-                const int use_idx = bwd_buf_idx;
-                bwd_buf_idx = 1 - bwd_buf_idx;
-
-                if (mb + 1 < microbatch_count) {
-                    MPI_Irecv(bwd_buf[bwd_buf_idx].data.data(),
-                              static_cast<int>(bwd_buf[bwd_buf_idx].data.size()),
-                              MPI_FLOAT, rank + 1, TAG_BWD, comm, &bwd_recv_req);
-                }
-
-                t0 = MPI_Wtime();
+                Matrix recv_grad = recv_gradient_blocking(microbatch_size, slice->output_dim(), rank + 1, comm);
                 grads = slice->backward_nonlast(
-                    bwd_buf[use_idx],
-                    slots[static_cast<size_t>(mb)].forward_state,
+                    recv_grad,
+                    slots[static_cast<size_t>(mb)].data.forward_state,
                     slice->is_first() ? nullptr : &grad_to_prev);
-                t1 = MPI_Wtime();
-                if (timings) timings->bwd_compute_s += t1 - t0;
             }
 
             if (!slice->is_first() && !grad_to_prev.data.empty()) {
-                slots[static_cast<size_t>(mb)].grad_to_prev = std::move(grad_to_prev);
-                MPI_Isend(slots[static_cast<size_t>(mb)].grad_to_prev.data.data(),
-                          static_cast<int>(slots[static_cast<size_t>(mb)].grad_to_prev.data.size()),
-                          MPI_FLOAT, rank - 1, TAG_BWD, comm,
-                          &slots[static_cast<size_t>(mb)].bwd_send_req);
+                slots[static_cast<size_t>(mb)].data.grad_to_prev = std::move(grad_to_prev);
+                slots[static_cast<size_t>(mb)].data.bwd_send_req = send_gradient_nonblocking(
+                    slots[static_cast<size_t>(mb)].data.grad_to_prev,
+                    rank - 1,
+                    comm);
             }
 
-            t0 = MPI_Wtime();
             accumulate_gradients(&accumulated_grads, grads);
-            t1 = MPI_Wtime();
-            if (timings) timings->grad_accum_s += t1 - t0;
+            slots[static_cast<size_t>(mb)].has_backward = true;
         }
     }
 
-    // Drain all pending sends and time them.
     for (auto& slot : slots) {
-        if (slot.fwd_send_req != MPI_REQUEST_NULL) {
-            t0 = MPI_Wtime();
-            MPI_Wait(&slot.fwd_send_req, MPI_STATUS_IGNORE);
-            t1 = MPI_Wtime();
-            if (timings) timings->fwd_send_s += t1 - t0;
+        if (slot.data.fwd_send_req != MPI_REQUEST_NULL) {
+            MPI_Wait(&slot.data.fwd_send_req, MPI_STATUS_IGNORE);
         }
-        if (slot.bwd_send_req != MPI_REQUEST_NULL) {
-            t0 = MPI_Wtime();
-            MPI_Wait(&slot.bwd_send_req, MPI_STATUS_IGNORE);
-            t1 = MPI_Wtime();
-            if (timings) timings->bwd_send_s += t1 - t0;
+        if (slot.data.bwd_send_req != MPI_REQUEST_NULL) {
+            MPI_Wait(&slot.data.bwd_send_req, MPI_STATUS_IGNORE);
         }
     }
 
-    const float scale = 1.0f / static_cast<float>(microbatch_count);
-    for (auto& wg : accumulated_grads.weight_grads) {
-        for (float& v : wg.data) v *= scale;
-    }
-    for (auto& bg : accumulated_grads.bias_grads) {
-        for (float& v : bg) v *= scale;
-    }
-
-    t0 = MPI_Wtime();
     slice->apply_gradients(accumulated_grads, learning_rate);
-    t1 = MPI_Wtime();
-    if (timings) timings->grad_apply_s += t1 - t0;
 
     StepResult result{0.0f, 0.0f};
     if (weight > 0) {
@@ -607,32 +491,27 @@ ValResult run_mp_eval(
     int steps = 0;
 
     for (int pos = 0; pos + batch_size <= val.features.rows; pos += batch_size) {
+        Matrix x_batch(batch_size, val.features.cols, 0.0f);
         std::vector<int> y_batch(static_cast<size_t>(batch_size));
         for (int i = 0; i < batch_size; ++i) {
+            for (int j = 0; j < val.features.cols; ++j) {
+                x_batch.at(i, j) = val.features.at(pos + i, j);
+            }
             y_batch[static_cast<size_t>(i)] = val.labels[static_cast<size_t>(pos + i)];
         }
 
-        Matrix local_input(batch_size, slice->input_dim(), 0.0f);
+        Matrix local_input;
         if (!slice->is_first()) {
-            MPI_Recv(local_input.data.data(),
-                     static_cast<int>(local_input.data.size()),
-                     MPI_FLOAT, rank - 1, TAG_FWD, comm, MPI_STATUS_IGNORE);
+            local_input = recv_activation_blocking(rank - 1, comm);
         } else {
-            for (int i = 0; i < batch_size; ++i) {
-                for (int j = 0; j < val.features.cols; ++j) {
-                    local_input.at(i, j) = val.features.at(pos + i, j);
-                }
-            }
+            local_input = x_batch;
         }
 
         ForwardState state = slice->forward_state(local_input);
-
         if (!slice->is_last()) {
             const Matrix& local_output = state.activations.back();
             MPI_Request send_req = MPI_REQUEST_NULL;
-            MPI_Isend(local_output.data.data(),
-                      static_cast<int>(local_output.data.size()),
-                      MPI_FLOAT, rank + 1, TAG_FWD, comm, &send_req);
+            send_activation_nonblocking(local_output, rank + 1, comm, &send_req);
             MPI_Wait(&send_req, MPI_STATUS_IGNORE);
         }
 
@@ -667,27 +546,12 @@ EpochMetrics run_mp_epoch(
     std::mt19937* rng,
     int rank,
     int world_size,
-    int epoch,
     MPI_Comm comm) {
     if (slice == nullptr || epoch_indices == nullptr || rng == nullptr) {
         throw std::invalid_argument("run_mp_epoch requires non-null pointers");
     }
 
     std::shuffle(epoch_indices->begin(), epoch_indices->end(), *rng);
-
-    const int microbatch_size = config.batch_size / config.microbatch_count;
-    std::vector<Matrix> x_microbatches;
-    std::vector<std::vector<int>> y_microbatches;
-    if (slice->is_first()) {
-        x_microbatches.assign(
-            static_cast<size_t>(config.microbatch_count),
-            Matrix(microbatch_size, train.features.cols, 0.0f));
-    }
-    if (slice->is_last()) {
-        y_microbatches.assign(
-            static_cast<size_t>(config.microbatch_count),
-            std::vector<int>(static_cast<size_t>(microbatch_size)));
-    }
 
     MPI_Barrier(comm);
     const auto t0 = std::chrono::high_resolution_clock::now();
@@ -696,46 +560,21 @@ EpochMetrics run_mp_epoch(
     float sum_acc = 0.0f;
     int steps = 0;
 
-    PipelineTimings epoch_timings;
-
     for (int pos = 0; pos + config.batch_size <= train.features.rows; pos += config.batch_size) {
-        if (slice->is_first()) {
-            for (int mb = 0; mb < config.microbatch_count; ++mb) {
-                for (int i = 0; i < microbatch_size; ++i) {
-                    const int src = (*epoch_indices)[static_cast<size_t>(
-                        pos + mb * microbatch_size + i)];
-                    for (int j = 0; j < train.features.cols; ++j) {
-                        x_microbatches[static_cast<size_t>(mb)].at(i, j) =
-                            train.features.at(src, j);
-                    }
-                }
-            }
-        }
-        if (slice->is_last()) {
-            for (int mb = 0; mb < config.microbatch_count; ++mb) {
-                for (int i = 0; i < microbatch_size; ++i) {
-                    const int src = (*epoch_indices)[static_cast<size_t>(
-                        pos + mb * microbatch_size + i)];
-                    y_microbatches[static_cast<size_t>(mb)][static_cast<size_t>(i)] =
-                        train.labels[static_cast<size_t>(src)];
-                }
-            }
-        }
+        Matrix x_batch;
+        std::vector<int> y_batch;
+        gather_batch(train, *epoch_indices, pos, config.batch_size, &x_batch, &y_batch);
 
-        PipelineTimings step_timings;
         const StepResult step_result = run_mp_pipeline_batch(
             slice,
-            x_microbatches,
-            y_microbatches,
+            x_batch,
+            y_batch,
             config.microbatch_count,
-            microbatch_size,
             config.learning_rate,
             rank,
             world_size,
-            comm,
-            &step_timings);
+            comm);
 
-        epoch_timings.accumulate(step_timings);
         sum_loss += step_result.train_loss;
         sum_acc += step_result.train_acc;
         ++steps;
@@ -750,8 +589,6 @@ EpochMetrics run_mp_epoch(
     MPI_Barrier(comm);
     const auto t1 = std::chrono::high_resolution_clock::now();
 
-    print_epoch_timings(epoch_timings, rank, world_size, epoch, comm);
-
     EpochMetrics out;
     out.train_loss = sum_loss / static_cast<float>(steps);
     out.train_acc = sum_acc / static_cast<float>(steps);
@@ -760,11 +597,9 @@ EpochMetrics run_mp_epoch(
     out.epoch_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     return out;
 }
-
-}  // anonymous namespace
+}
 
 namespace mpi_mp {
-
 int run_mpi_model_parallel_pipeline(
     const TrainConfig& config,
     int rank,
@@ -776,8 +611,8 @@ int run_mpi_model_parallel_pipeline(
         const int num_layers = static_cast<int>(layer_sizes.size()) - 1;
         if (num_layers < world_size) {
             throw std::invalid_argument(
-                "Model parallelism requires num_layers (" + std::to_string(num_layers) +
-                ") >= world_size (" + std::to_string(world_size) + ")");
+                "Model parallelism requires num_layers (" + std::to_string(num_layers) + ") >= world_size (" +
+                std::to_string(world_size) + ")");
         }
         if (config.batch_size % config.microbatch_count != 0) {
             throw std::invalid_argument(
@@ -794,8 +629,7 @@ int run_mpi_model_parallel_pipeline(
 
         for (int r = 0; r < world_size; ++r) {
             if (rank == r) {
-                std::cout << "Rank " << rank << " owns layers ["
-                          << range.start << ", " << range.end << ")\n";
+                std::cout << "Rank " << rank << " owns layers [" << range.start << ", " << range.end << ")\n";
             }
             MPI_Barrier(comm);
         }
@@ -804,8 +638,7 @@ int run_mpi_model_parallel_pipeline(
         const std::string hidden_str = hidden_layers_csv(config.hidden_layers);
         if (rank == 0) {
             if (!ensure_parent_dir(config.output_csv)) {
-                throw std::runtime_error(
-                    "Failed to create output directory for: " + config.output_csv);
+                throw std::runtime_error("Failed to create output directory for: " + config.output_csv);
             }
             out.open(config.output_csv);
             if (!out.is_open()) {
@@ -825,18 +658,17 @@ int run_mpi_model_parallel_pipeline(
                 &rng,
                 rank,
                 world_size,
-                epoch,
                 comm);
 
             if (rank == 0) {
-                out << "mpi-mp-pip," << config.seed << "," << config.learning_rate << ","
+                out << "mpi-mp," << config.seed << "," << config.learning_rate << ","
                     << config.batch_size << "," << config.train_samples << ","
                     << config.val_samples << "," << hidden_str << "," << epoch << ","
                     << epoch_metrics.train_loss << "," << epoch_metrics.train_acc << ","
                     << epoch_metrics.val_loss << "," << epoch_metrics.val_acc << ","
                     << epoch_metrics.epoch_time_ms << "\n";
 
-                std::cout << "[mpi-mp-pip] epoch " << epoch << "/" << config.epochs
+                std::cout << "[mpi-mp] epoch " << epoch << "/" << config.epochs
                           << " time_ms=" << epoch_metrics.epoch_time_ms
                           << " train_loss=" << epoch_metrics.train_loss
                           << " train_acc=" << epoch_metrics.train_acc
@@ -854,4 +686,4 @@ int run_mpi_model_parallel_pipeline(
 }
 
 }
-}
+}  // namespace nn
