@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """
-visualize_sweep.py  --  Chart 2 visualisation
+visualize_sweep.py
 
 Usage:
-    python3 scripts/visualize_sweep.py <metrics.csv> <timings.csv>
+    python3 src/visualize_sweep.py <result_dir>
 
-Produces (saved next to metrics.csv):
-    chart2_epoch_time.png     -- epoch time vs batch size, all three modes
-    chart2_throughput.png     -- throughput vs batch size, all three modes
-    chart2_timing_mp.png      -- timing breakdown stacked bar, model-parallel
-    chart2_timing_pip.png     -- timing breakdown stacked bar, pipeline
-    chart2_timing_compare.png -- compute vs comm side-by-side, both MPI modes
-    chart2_time_budget.png    -- horizontal time budget, poster-ready
+Reads from result_dir:
+    chart1_batch_sweep.csv       -- batch size sweep  (serial + mp + pip)
+    chart2_microbatch_sweep.csv  -- microbatch sweep  (serial + mp + pip)
+    chart3_time_split.csv        -- pipeline timing breakdown per epoch
+    chart4_worldsize_sweep.csv   -- world size sweep  (serial + mp + pip)
+
+Each chart CSV is optional; missing files are skipped with a warning.
+
+Outputs (written to result_dir):
+    chart1_epoch_time.png
+    chart1_throughput.png
+    chart2_epoch_time.png
+    chart2_timing_split.png
+    chart4_epoch_time.png
+    chart4_throughput.png
+    chart4_speedup.png
 """
 
 import sys
@@ -23,117 +32,31 @@ try:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
     import numpy as np
 except ImportError:
     print("matplotlib and numpy are required: pip install matplotlib numpy")
     sys.exit(1)
 
-# ─── Run configuration ────────────────────────────────────────────────────────
-# Edit these to match your experiment before running.
-MICROBATCH_COUNT = 32
-NODES            = 4
-TASKS_PER_NODE   = 2
-
-def run_config_note():
-    """Single annotation line shown on every chart."""
-    W = NODES * TASKS_PER_NODE
-    return (f"M={MICROBATCH_COUNT} microbatches  ·  "
-            f"{NODES} nodes × {TASKS_PER_NODE} proc/node  (W={W})")
-
-
-# ─── Load data ────────────────────────────────────────────────────────────────
-
-def load_metrics(path):
-    rows = []
-    with open(path) as f:
-        for row in csv.DictReader(f):
-            try:
-                rows.append({
-                    "mode":          row["mode"],
-                    "batch_size":    int(row["batch_size"]),
-                    "epoch":         int(row["epoch"]),
-                    "train_loss":    float(row["train_loss"]),
-                    "train_acc":     float(row["train_acc"]),
-                    "val_loss":      float(row["val_loss"]),
-                    "val_acc":       float(row["val_acc"]),
-                    "epoch_time_ms": float(row["epoch_time_ms"]),
-                    "train_samples": int(row["train_samples"]),
-                })
-            except (ValueError, KeyError):
-                continue
-    return rows
-
-
-def load_timings(path):
-    rows = []
-    with open(path) as f:
-        for row in csv.DictReader(f):
-            rows.append({
-                "mode":       row["mode"],
-                "batch_size": int(row["batch_size"]),
-                "epoch":      int(row["epoch"]),
-                "metric":     row["metric"],
-                "min_s":      float(row["min_s"]),
-                "mean_s":     float(row["mean_s"]),
-                "max_s":      float(row["max_s"]),
-            })
-    return rows
-
-
-def avg_last_half(rows, key, mode, batch):
-    """Average a metric over the last half of epochs to reduce noise."""
-    subset = [r[key] for r in rows
-              if r["mode"] == mode and r["batch_size"] == batch]
-    if not subset:
-        return None
-    half = max(1, len(subset) // 2)
-    return sum(subset[-half:]) / half
-
-
-def _timing_by_metric(timings, mode, batch, field):
-    by_metric_epoch = defaultdict(list)
-    for row in timings:
-        if row["mode"] == mode and row["batch_size"] == batch:
-            by_metric_epoch[row["metric"]].append((row["epoch"], row[field]))
-    result = {}
-    for metric, epoch_vals in by_metric_epoch.items():
-        epoch_vals.sort()
-        half = max(1, len(epoch_vals) // 2)
-        result[metric] = sum(v for _, v in epoch_vals[-half:]) / half
-    return result
-
-
-def timing_mean_by_metric(timings, mode, batch):
-    """Mean across ranks — safe to stack. Sum ≈ mean total rank time."""
-    return _timing_by_metric(timings, mode, batch, "mean_s")
-
-
-def timing_max_by_metric(timings, mode, batch):
-    """Max across ranks — NOT safe to stack. Use for % budget charts only."""
-    return _timing_by_metric(timings, mode, batch, "max_s")
-
-
-# ─── Shared style constants ───────────────────────────────────────────────────
+# ── Style constants ────────────────────────────────────────────────────────────
 
 COLORS = {
-    "serial":     "#4C72B0",
-    "mpi-mp":     "#DD8452",
-    "mpi-mp-pip": "#55A868",
+    "serial":                "#4C72B0",
+    "mpi-mp":                "#DD8452",
+    "mpi-mp-pip":            "#55A868",
+    "mpi-mp-pip-balanced":   "#8172B2",
 }
 LABELS = {
-    "serial":     "Serial",
-    "mpi-mp":     "Model parallel",
-    "mpi-mp-pip": "Pipeline parallel",
+    "serial":                "Serial",
+    "mpi-mp":                "Model parallel",
+    "mpi-mp-pip":            "Pipeline parallel",
+    "mpi-mp-pip-balanced":   "Pipeline parallel (balanced)",
 }
+MODES = ["serial", "mpi-mp", "mpi-mp-pip", "mpi-mp-pip-balanced"]
 
-TIMING_METRICS_MP = [
+TIMING_ORDER = [
     "fwd_comm", "fwd_compute", "fwd_send",
-    "bwd_comm", "bwd_compute", "grad_apply", "bwd_send",
-]
-TIMING_METRICS_PIP = [
-    "fwd_comm", "fwd_compute", "fwd_send",
-    "bwd_comm", "bwd_compute", "grad_accum", "grad_apply", "bwd_send",
+    "bwd_comm", "bwd_compute",
+    "grad_accum", "grad_apply", "bwd_send",
 ]
 TIMING_COLORS = {
     "fwd_comm":    "#d62728",
@@ -146,23 +69,122 @@ TIMING_COLORS = {
     "bwd_send":    "#f7b6d2",
 }
 TIMING_LABELS = {
-    "fwd_comm":    "fwd comm (MPI wait)",
+    "fwd_comm":    "fwd comm (wait)",
     "fwd_compute": "fwd compute",
     "fwd_send":    "fwd send drain",
-    "bwd_comm":    "bwd comm (MPI wait)",
+    "bwd_comm":    "bwd comm (wait)",
     "bwd_compute": "bwd compute",
     "grad_accum":  "grad accumulate",
     "grad_apply":  "grad apply",
     "bwd_send":    "bwd send drain",
 }
 
+# ── Data loading ───────────────────────────────────────────────────────────────
 
-def add_config_note(fig):
-    """Stamp the run config as a small italic note at the bottom of the figure."""
-    fig.text(0.99, 0.01, run_config_note(),
-             ha="right", va="bottom", fontsize=8,
-             color="#777", style="italic",
-             transform=fig.transFigure)
+def load_metrics(path):
+    """
+    Load a chart metrics CSV (chart1/2/4 format).
+    Extra columns are ignored; rows with parse errors are skipped silently.
+    """
+    rows = []
+    with open(path) as f:
+        for row in csv.DictReader(f):
+            try:
+                rows.append({
+                    "mode":             row["mode"],
+                    "batch_size":       int(row["batch_size"]),
+                    "microbatch_count": int(row["microbatch_count"]),
+                    "mb_size":          int(row["mb_size"]),
+                    "world_size":       int(row["world_size"]),
+                    "nodes":            int(row["nodes"]),
+                    "layout":           row["layout"],
+                    "epoch":            int(row["epoch"]),
+                    "train_loss":       float(row["train_loss"]),
+                    "train_acc":        float(row["train_acc"]),
+                    "val_loss":         float(row["val_loss"]),
+                    "val_acc":          float(row["val_acc"]),
+                    "epoch_time_ms":    float(row["epoch_time_ms"]),
+                    "train_samples":    int(row["train_samples"]),
+                })
+            except (ValueError, KeyError):
+                continue
+    return rows
+
+
+def load_timings(path):
+    """
+    Load chart3_time_split.csv.
+    Only mean_s is required; min_s and max_s are absent in the new format.
+    """
+    rows = []
+    with open(path) as f:
+        for row in csv.DictReader(f):
+            try:
+                rows.append({
+                    "mode":             row["mode"],
+                    "batch_size":       int(row["batch_size"]),
+                    "microbatch_count": int(row["microbatch_count"]),
+                    "mb_size":          int(row["mb_size"]),
+                    "epoch":            int(row["epoch"]),
+                    "metric":           row["metric"].strip(),
+                    "mean_s":           float(row["mean_s"]),
+                })
+            except (ValueError, KeyError):
+                continue
+    return rows
+
+# ── Aggregation helpers ────────────────────────────────────────────────────────
+
+def _matches(row, filters):
+    return all(row.get(k) == v for k, v in filters.items())
+
+
+def avg_last_half(rows, value_key, **filters):
+    """
+    Average value_key over the last half of epochs for rows matching filters.
+    Returns None if no matching rows exist.
+    """
+    subset = [r[value_key] for r in rows if _matches(r, filters)]
+    if not subset:
+        return None
+    half = max(1, len(subset) // 2)
+    return sum(subset[-half:]) / half
+
+
+def timing_means(timings, **filters):
+    """
+    Return {metric: mean_s} averaged over last half of epochs, for rows
+    matching filters.  Safe to stack — uses the mean-across-ranks column.
+    """
+    by_metric = defaultdict(list)
+    for row in timings:
+        if _matches(row, filters):
+            by_metric[row["metric"]].append((row["epoch"], row["mean_s"]))
+    result = {}
+    for metric, epoch_vals in by_metric.items():
+        epoch_vals.sort()
+        half = max(1, len(epoch_vals) // 2)
+        result[metric] = sum(v for _, v in epoch_vals[-half:]) / half
+    return result
+
+# ── Derived metrics ────────────────────────────────────────────────────────────
+
+def epoch_time_s(rows, **filters):
+    v = avg_last_half(rows, "epoch_time_ms", **filters)
+    return v / 1000.0 if v is not None else None
+
+
+def throughput(rows, **filters):
+    t = epoch_time_s(rows, **filters)
+    samples = next(
+        (r["train_samples"] for r in rows if _matches(r, filters)), None)
+    return samples / t if (t and samples) else None
+
+# ── Shared figure helpers ──────────────────────────────────────────────────────
+
+def add_note(fig, text):
+    fig.text(0.99, 0.01, text, ha="right", va="bottom",
+             fontsize=8, color="#777", style="italic")
 
 
 def save(fig, path):
@@ -171,262 +193,287 @@ def save(fig, path):
     print(f"  saved: {path}")
 
 
-# ─── Chart 1: epoch time ──────────────────────────────────────────────────────
+def _line_plot(ax, x_vals, y_vals, mode, linestyle="-"):
+    valid = [(x, y) for x, y in zip(x_vals, y_vals) if y is not None]
+    if not valid:
+        return
+    xs, ys = zip(*valid)
+    ax.plot(xs, ys, marker="o", label=LABELS[mode],
+            color=COLORS[mode], lw=2, linestyle=linestyle)
 
-def plot_epoch_time(metrics, batches, modes, out_dir):
+# ── Chart 1: epoch time and throughput vs batch size ──────────────────────────
+
+def chart1(metrics, out_dir):
+    batches = sorted({r["batch_size"] for r in metrics})
+    if not batches:
+        print("  chart1: no data, skipping")
+        return
+
+    # Build a note from a non-serial row (serial has no layout/ws context).
+    ref = next((r for r in metrics if r["mode"] != "serial"), None)
+    note = (f"layout={ref['layout']}  ws={ref['world_size']}" if ref else "")
+
+    # Epoch time.
     fig, ax = plt.subplots(figsize=(8, 5))
-    for mode in modes:
-        times = [avg_last_half(metrics, "epoch_time_ms", mode, b) for b in batches]
-        valid = [(b, t) for b, t in zip(batches, times) if t is not None]
-        if not valid:
-            continue
-        xs, ys = zip(*valid)
-        ax.plot(xs, [y / 1000 for y in ys],
-                marker="o", label=LABELS[mode], color=COLORS[mode], linewidth=2)
-
-    ax.set_xlabel("Batch size")
-    ax.set_ylabel("Epoch time (s)")
-    ax.set_title("Epoch time vs batch size\n(avg over last half of epochs)")
+    for mode in MODES:
+        ys = [epoch_time_s(metrics, mode=mode, batch_size=b) for b in batches]
+        _line_plot(ax, batches, ys, mode)
     ax.set_xscale("log", base=2)
     ax.set_xticks(batches)
     ax.set_xticklabels([str(b) for b in batches])
+    ax.set_xlabel("Batch size")
+    ax.set_ylabel("Epoch time (s)")
+    ax.set_title("Epoch time vs batch size\n(mean over last half of epochs)")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    add_config_note(fig)
+    add_note(fig, note)
     fig.tight_layout()
-    save(fig, os.path.join(out_dir, "chart2_epoch_time.png"))
+    save(fig, os.path.join(out_dir, "chart1_epoch_time.png"))
 
-
-# ─── Chart 2: throughput ──────────────────────────────────────────────────────
-
-def plot_throughput(metrics, batches, modes, out_dir):
+    # Throughput.
     fig, ax = plt.subplots(figsize=(8, 5))
-    for mode in modes:
-        vals = []
-        for b in batches:
-            t = avg_last_half(metrics, "epoch_time_ms", mode, b)
-            samples = next(
-                (r["train_samples"] for r in metrics
-                 if r["mode"] == mode and r["batch_size"] == b), None)
-            vals.append((b, samples / (t / 1000)) if t and samples else (b, None))
-        valid = [(b, v) for b, v in vals if v is not None]
-        if not valid:
-            continue
-        xs, ys = zip(*valid)
-        ax.plot(xs, ys, marker="o", label=LABELS[mode],
-                color=COLORS[mode], linewidth=2)
-
+    for mode in MODES:
+        ys = [throughput(metrics, mode=mode, batch_size=b) for b in batches]
+        _line_plot(ax, batches, ys, mode)
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(batches)
+    ax.set_xticklabels([str(b) for b in batches])
     ax.set_xlabel("Batch size")
     ax.set_ylabel("Throughput (samples / s)")
     ax.set_title("Throughput vs batch size")
-    ax.set_xscale("log", base=2)
-    ax.set_xticks(batches)
-    ax.set_xticklabels([str(b) for b in batches])
     ax.legend()
     ax.grid(True, alpha=0.3)
-    add_config_note(fig)
+    add_note(fig, note)
     fig.tight_layout()
-    save(fig, os.path.join(out_dir, "chart2_throughput.png"))
+    save(fig, os.path.join(out_dir, "chart1_throughput.png"))
 
+# ── Chart 2: epoch time and timing split vs microbatch count ──────────────────
 
-# ─── Chart 3 & 4: timing breakdown stacked bar ────────────────────────────────
+def chart2(metrics, timings, out_dir):
+    # Distinct microbatch counts used by the pipeline runs (mb=0 means N/A).
+    mb_counts = sorted({r["microbatch_count"] for r in metrics
+                        if r["mode"] == "mpi-mp-pip" and r["microbatch_count"] > 0})
+    if not mb_counts:
+        print("  chart2: no pipeline microbatch data found, skipping")
+        return
 
-def plot_timing_breakdown(timings, batches, mode, metric_order, out_dir, tag,
-                          metrics=None):
+    batch = next((r["batch_size"] for r in metrics
+                  if r["mode"] == "mpi-mp-pip"), None)
+    ws    = next((r["world_size"] for r in metrics
+                  if r["mode"] == "mpi-mp-pip"), "?")
+    note = f"batch={batch}  ws={ws}"
+
+    # Build mb_size lookup for axis labels.
+    mb_size_of = {r["microbatch_count"]: r["mb_size"] for r in metrics
+                  if r["mode"] == "mpi-mp-pip" and r["microbatch_count"] > 0}
+    xlabels = [f"M={m}\n(mb_size={mb_size_of.get(m, '?')})" for m in mb_counts]
+    x = np.arange(len(mb_counts))
+
+    # ── Epoch time ──
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Pipeline varies with mb.
+    pip_ys = [epoch_time_s(metrics, mode="mpi-mp-pip", microbatch_count=m)
+              for m in mb_counts]
+    ax.plot(x, pip_ys, marker="o", label=LABELS["mpi-mp-pip"],
+            color=COLORS["mpi-mp-pip"], lw=2)
+
+    # Serial and mp are flat reference lines (recorded with mb=0).
+    for mode in ("serial", "mpi-mp"):
+        t = epoch_time_s(metrics, mode=mode, microbatch_count=0)
+        if t is not None:
+            ax.axhline(t, linestyle="--", color=COLORS[mode],
+                       label=LABELS[mode], lw=1.5)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(xlabels)
+    ax.set_xlabel("Microbatch count (M)")
+    ax.set_ylabel("Epoch time (s)")
+    ax.set_title("Epoch time vs microbatch count\n(mean over last half of epochs)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    add_note(fig, note)
+    fig.tight_layout()
+    save(fig, os.path.join(out_dir, "chart2_epoch_time.png"))
+
+    # ── Timing split stacked bar (pipeline only) ──
     fig, ax = plt.subplots(figsize=(9, 5))
+    bottoms = np.zeros(len(mb_counts))
 
-    x = np.arange(len(batches))
-    width = 0.55
-    bottoms = np.zeros(len(batches))
-
-    for metric in metric_order:
+    for metric in TIMING_ORDER:
         heights = np.array([
-            timing_mean_by_metric(timings, mode, b).get(metric, 0.0)
-            for b in batches
+            timing_means(timings, mode="mpi-mp-pip",
+                         microbatch_count=m).get(metric, 0.0)
+            for m in mb_counts
         ])
         if heights.sum() == 0:
             continue
-        ax.bar(x, heights, width, bottom=bottoms,
+        ax.bar(x, heights, 0.55, bottom=bottoms,
                label=TIMING_LABELS.get(metric, metric),
-               color=TIMING_COLORS.get(metric, "#888888"))
+               color=TIMING_COLORS.get(metric, "#888"))
         bottoms += heights
 
-    # Wall-clock epoch time as a reference diamond — bars should track this
-    # closely since we now use mean_s (safe to sum) rather than max_s.
-    if metrics is not None:
-        wall_s = [avg_last_half(metrics, "epoch_time_ms", mode, b) for b in batches]
-        wall_s = [w / 1000 if w is not None else None for w in wall_s]
-        vx = [xi for xi, w in zip(x, wall_s) if w is not None]
-        vw = [w for w in wall_s if w is not None]
-        if vx:
-            ax.plot(vx, vw, marker="D", color="black", linewidth=1.5,
-                    markersize=5, label="wall-clock epoch time", zorder=5)
-
     ax.set_xticks(x)
-    ax.set_xticklabels([str(b) for b in batches])
-    ax.set_xlabel("Batch size")
+    ax.set_xticklabels(xlabels)
+    ax.set_xlabel("Microbatch count (M)")
     ax.set_ylabel("Time (s, mean across ranks, epoch total)")
-    ax.set_title(f"Timing breakdown — {LABELS[mode]}\n"
-                 f"(mean across ranks — safe to stack)")
-    ax.legend(loc="upper left", fontsize=8)
+    ax.set_title("Pipeline timing breakdown vs microbatch count")
+    ax.legend(loc="upper right", fontsize=8)
     ax.grid(True, axis="y", alpha=0.3)
-    add_config_note(fig)
+    add_note(fig, note)
     fig.tight_layout()
-    save(fig, os.path.join(out_dir, f"chart2_timing_{tag}.png"))
+    save(fig, os.path.join(out_dir, "chart2_timing_split.png"))
 
+# ── Chart 4: epoch time, throughput, and speedup vs world size ────────────────
 
-# ─── Chart 5: time budget (poster-ready) ─────────────────────────────────────
+def chart4(metrics, out_dir):
+    ws_values = sorted({r["world_size"] for r in metrics})
+    if not ws_values:
+        print("  chart4: no data, skipping")
+        return
 
-def plot_time_budget(timings, batches, out_dir):
-    COMPUTE  = {"fwd_compute", "bwd_compute"}
-    FWD_WAIT = {"fwd_comm"}
-    BWD_WAIT = {"bwd_comm"}
+    batch = next((r["batch_size"] for r in metrics
+                  if r["mode"] == "mpi-mp-pip"), None)
+    mb    = next((r["microbatch_count"] for r in metrics
+                  if r["mode"] == "mpi-mp-pip" and r["microbatch_count"] > 0), None)
+    note = f"batch={batch}  M={mb}  2 tasks/node"
 
-    mpi_modes   = ["mpi-mp", "mpi-mp-pip"]
-    mode_labels = {"mpi-mp": "Model parallel", "mpi-mp-pip": "Pipeline parallel"}
-    BUD_COLORS  = {
-        "compute": "#6b1515",
-        "fwd":     "#c0392b",
-        "bwd":     "#922b21",
-        "other":   "#e8a0a0",
-    }
+    x       = np.arange(len(ws_values))
+    xlabels = [str(ws) for ws in ws_values]
 
-    batch = batches[-1]
-    rows  = [("Serial", None)] + [(mode_labels[m], m) for m in mpi_modes]
+    # ── Epoch time ──
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for mode in MODES:
+        ys = [epoch_time_s(metrics, mode=mode, world_size=ws)
+              for ws in ws_values]
+        ls = "--" if mode == "serial" else "-"
+        _line_plot(ax, x, ys, mode, linestyle=ls)
+    ax.set_xticks(x)
+    ax.set_xticklabels(xlabels)
+    ax.set_xlabel("World size (total ranks)")
+    ax.set_ylabel("Epoch time (s)")
+    ax.set_title("Epoch time vs world size\n(mean over last half of epochs)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    add_note(fig, note)
+    fig.tight_layout()
+    save(fig, os.path.join(out_dir, "chart4_epoch_time.png"))
 
-    fig, ax = plt.subplots(figsize=(10, 0.9 + len(rows) * 0.8))
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("white")
+    # ── Throughput ──
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for mode in MODES:
+        ys = [throughput(metrics, mode=mode, world_size=ws)
+              for ws in ws_values]
+        ls = "--" if mode == "serial" else "-"
+        _line_plot(ax, x, ys, mode, linestyle=ls)
+    ax.set_xticks(x)
+    ax.set_xticklabels(xlabels)
+    ax.set_xlabel("World size (total ranks)")
+    ax.set_ylabel("Throughput (samples / s)")
+    ax.set_title("Throughput vs world size")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    add_note(fig, note)
+    fig.tight_layout()
+    save(fig, os.path.join(out_dir, "chart4_throughput.png"))
 
-    yticks, ylabels = [], []
-    for idx, (label, mode) in enumerate(rows):
-        y = len(rows) - 1 - idx
-        yticks.append(y)
-        ylabels.append(label)
+    # ── Balanced improvement over unbalanced pipeline ──
+    # Shows (pip_time - pip_bal_time) / pip_time * 100 per world size.
+    # Positive = balanced is faster. Zero at ws=8 is expected (1 layer/rank,
+    # no skew to fix). The interesting signal is at ws=2 and ws=4.
+    fig, ax = plt.subplots(figsize=(8, 5))
 
-        if mode is None:
-            segs = {"compute": 100.0, "fwd": 0.0, "bwd": 0.0, "other": 0.0}
+    improvements = []
+    for ws in ws_values:
+        t_pip = epoch_time_s(metrics, mode="mpi-mp-pip",          world_size=ws)
+        t_bal = epoch_time_s(metrics, mode="mpi-mp-pip-balanced",  world_size=ws)
+        if t_pip and t_bal:
+            improvements.append((t_pip - t_bal) / t_pip * 100.0)
         else:
-            t     = timing_mean_by_metric(timings, mode, batch)
-            total = sum(t.values()) or 1.0
-            segs  = {
-                "compute": sum(t.get(m, 0) for m in COMPUTE)  / total * 100,
-                "fwd":     sum(t.get(m, 0) for m in FWD_WAIT) / total * 100,
-                "bwd":     sum(t.get(m, 0) for m in BWD_WAIT) / total * 100,
-            }
-            segs["other"] = 100 - sum(segs.values())
+            improvements.append(None)
 
-        left = 0.0
-        for key, color in BUD_COLORS.items():
-            w = segs.get(key, 0.0)
-            if w <= 0:
-                continue
-            ax.barh(y, w, left=left, height=0.55, color=color)
-            if w >= 7:
-                ax.text(left + w / 2, y,
-                        f"{'compute' if key == 'compute' else key} ({w:.0f}%)",
-                        ha="center", va="center", fontsize=9,
-                        color="white" if key != "other" else "#7b1a1a",
-                        fontweight="bold")
-            left += w
+    valid_x = [xi for xi, v in zip(x, improvements) if v is not None]
+    valid_y = [v  for v       in improvements         if v is not None]
 
-    ax.set_yticks(yticks)
-    ax.set_yticklabels(ylabels, fontsize=11)
-    ax.set_xlim(0, 100)
-    ax.set_xlabel("% of total timing budget (mean rank)", fontsize=10)
-    ax.set_title(f"Time budget — batch {batch}, {NODES * TASKS_PER_NODE} ranks\n"
-                 f"compute | P2P fwd wait | P2P bwd wait | other",
-                 fontsize=11, pad=10)
-    ax.tick_params(left=False)
-    for spine in ["top", "right", "left"]:
-        ax.spines[spine].set_visible(False)
+    if valid_x:
+        ax.bar(valid_x, valid_y, color=[
+            COLORS["mpi-mp-pip-balanced"] if v >= 0 else "#d62728"
+            for v in valid_y
+        ], alpha=0.85, width=0.5)
 
-    ax.legend(handles=[
-        mpatches.Patch(facecolor=BUD_COLORS["compute"], label="Compute (fwd + bwd)"),
-        mpatches.Patch(facecolor=BUD_COLORS["fwd"],     label="P2P wait — fwd  (≈ AR fwd phase)"),
-        mpatches.Patch(facecolor=BUD_COLORS["bwd"],     label="P2P wait — bwd  (≈ AR bwd phase)"),
-        mpatches.Patch(facecolor=BUD_COLORS["other"],   label="Send drain + grad overhead"),
-    ], loc="lower right", fontsize=9, framealpha=0.0)
+        # Label each bar. For near-zero bars place the label above the
+        # baseline; for normal bars place it just above the bar top.
+        for xi, v in zip(valid_x, valid_y):
+            label_y = max(v, 0) + 0.15
+            ax.text(xi, label_y, f"{v:+.1f}%",
+                    ha="center", va="bottom", fontsize=10, fontweight="bold")
 
-    add_config_note(fig)
+    ax.axhline(0, color="black", lw=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(xlabels)
+    ax.set_xlabel("World size (total ranks)")
+    ax.set_ylabel("Epoch time improvement (%)")
+    ax.set_title(
+        "Load-balanced pipeline improvement over unbalanced\n"
+        "(pip_time − bal_time) / pip_time × 100  —  positive = balanced is faster")
+    ax.grid(True, axis="y", alpha=0.3)
+
+    # Add headroom above the tallest bar so its label is never clipped.
+    if valid_y:
+        y_max = max(valid_y)
+        y_min = min(valid_y)
+        padding = (y_max - min(y_min, 0)) * 0.18 + 0.5
+        ax.set_ylim(bottom=min(y_min, 0) - 0.3, top=y_max + padding)
+    add_note(fig, note)
     fig.tight_layout()
-    save(fig, os.path.join(out_dir, "chart2_time_budget.png"))
+    save(fig, os.path.join(out_dir, "chart4_balanced_improvement.png"))
 
-
-# ─── Chart 6: compute vs communication comparison ─────────────────────────────
-
-def plot_compute_vs_comm(timings, batches, out_dir):
-    COMPUTE = {"fwd_compute", "bwd_compute"}
-    COMM    = {"fwd_comm", "bwd_comm", "fwd_send", "bwd_send",
-               "grad_accum", "grad_apply"}
-
-    mpi_modes = ["mpi-mp", "mpi-mp-pip"]
-    x = np.arange(len(batches))
-    width = 0.35
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
-
-    for ax, mode in zip(axes, mpi_modes):
-        compute_vals = [sum(timing_mean_by_metric(timings, mode, b).get(m, 0) for m in COMPUTE)
-                        for b in batches]
-        comm_vals    = [sum(timing_mean_by_metric(timings, mode, b).get(m, 0) for m in COMM)
-                        for b in batches]
-
-        ax.bar(x - width / 2, compute_vals, width,
-               label="Compute", color="#1f77b4", alpha=0.85)
-        ax.bar(x + width / 2, comm_vals, width,
-               label="MPI overhead", color="#d62728", alpha=0.85)
-
-        ax.set_xticks(x)
-        ax.set_xticklabels([str(b) for b in batches])
-        ax.set_xlabel("Batch size")
-        ax.set_title(LABELS[mode])
-        ax.legend()
-        ax.grid(True, axis="y", alpha=0.3)
-
-    axes[0].set_ylabel("Time (s, mean across ranks, epoch total)")
-    fig.suptitle("Compute vs MPI overhead\n(mean across ranks)", y=1.02)
-    add_config_note(fig)
-    fig.tight_layout()
-    save(fig, os.path.join(out_dir, "chart2_timing_compare.png"))
-
-
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
 
-    metrics_path = sys.argv[1]
-    timings_path = sys.argv[2]
-    out_dir      = os.path.dirname(os.path.abspath(metrics_path))
+    result_dir = os.path.abspath(sys.argv[1])
+    if not os.path.isdir(result_dir):
+        print(f"error: {result_dir} is not a directory")
+        sys.exit(1)
 
-    metrics = load_metrics(metrics_path)
-    timings = load_timings(timings_path)
+    def try_load(filename, loader):
+        path = os.path.join(result_dir, filename)
+        if not os.path.exists(path):
+            print(f"  warning: {filename} not found, skipping")
+            return None
+        data = loader(path)
+        print(f"  loaded {len(data):>5} rows  <- {filename}")
+        return data
 
-    batches = sorted({r["batch_size"] for r in metrics})
-    modes   = ["serial", "mpi-mp", "mpi-mp-pip"]
+    print(f"Result dir: {result_dir}\n")
 
-    print(f"Loaded {len(metrics)} metric rows, {len(timings)} timing rows")
-    print(f"Batch sizes : {batches}")
-    print(f"Modes found : {sorted({r['mode'] for r in metrics})}")
-    print(f"Output dir  : {out_dir}")
-    print(f"Config note : {run_config_note()}")
+    m1 = try_load("chart1_batch_sweep.csv",      load_metrics)
+    m2 = try_load("chart2_microbatch_sweep.csv", load_metrics)
+    t3 = try_load("chart3_time_split.csv",       load_timings)
+    m4 = try_load("chart4_worldsize_sweep.csv",  load_metrics)
+
     print()
 
-    plot_epoch_time(metrics, batches, modes, out_dir)
-    plot_throughput(metrics, batches, modes, out_dir)
-    plot_timing_breakdown(
-        timings, batches, "mpi-mp",     TIMING_METRICS_MP,  out_dir, "mp",
-        metrics=metrics)
-    plot_timing_breakdown(
-        timings, batches, "mpi-mp-pip", TIMING_METRICS_PIP, out_dir, "pip",
-        metrics=metrics)
-    plot_time_budget(timings, batches, out_dir)
-    plot_compute_vs_comm(timings, batches, out_dir)
+    if m1:
+        print("── Chart 1: batch size sweep ──")
+        chart1(m1, result_dir)
 
-    print("All charts written.")
+    if m2 and t3:
+        print("── Chart 2/3: microbatch sweep ──")
+        chart2(m2, t3, result_dir)
+    elif m2:
+        print("── Chart 2: microbatch sweep (no timing data for split chart) ──")
+        chart2(m2, [], result_dir)
+
+    if m4:
+        print("── Chart 4: world size sweep ──")
+        chart4(m4, result_dir)
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":

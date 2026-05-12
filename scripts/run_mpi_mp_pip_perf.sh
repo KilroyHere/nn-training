@@ -6,19 +6,20 @@ BUILD_DIR="${ROOT_DIR}/build"
 RESULT_DIR="${ROOT_DIR}/results"
 OUT_CSV="${OUT_CSV:-${RESULT_DIR}/mpi_mp_pip_perf_metrics.csv}"
 MPI_BIN="${MPI_BIN:-${BUILD_DIR}/mpi_mp_pip_train}"
-MP_NODES="${MP_NODES:-4}"
+MP_NODES="${MP_NODES:-2}"
 MP_TASKS_PER_NODE="${MP_TASKS_PER_NODE:-2}"
 MP_CPUS_PER_TASK="${MP_CPUS_PER_TASK:-1}"
 
 EPOCHS="${EPOCHS:-2}"
 BATCH_SIZE="${BATCH_SIZE:-4096}"
-MICROBATCHES="${MICROBATCHES:-32}"
+MICROBATCHES="${MICROBATCHES:-8}"
 TRAIN_SAMPLES="${TRAIN_SAMPLES:-50000}"
 VAL_SAMPLES="${VAL_SAMPLES:-10000}"
 LEARNING_RATE="${LEARNING_RATE:-0.06}"
 SEED="${SEED:-42}"
 HIDDEN="${HIDDEN:-512,512,256,256,128,64,32}"
 DATA_DIR="${DATA_DIR:-${ROOT_DIR}/data/mnist}"
+BALANCE_LAYERS="${BALANCE_LAYERS:-false}"
 
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
@@ -56,10 +57,17 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   fi
 fi
 
+# Determine if we should pass the balance flag
+BALANCE_FLAG=""
+if [[ "${BALANCE_LAYERS}" == "true" || "${BALANCE_LAYERS}" == "1" ]]; then
+  BALANCE_FLAG="--load-balance-layers"
+fi
+
 echo "MPI Pipeline Model-Parallel perf launch config:"
 echo "  allocation: job_id=${SLURM_JOB_ID:-none} nodes=${SLURM_JOB_NUM_NODES:-unknown} ntasks=${SLURM_NTASKS:-unknown}"
 echo "  srun args:  nodes=${MP_NODES} ntasks=${MP_NTASKS} tasks_per_node=${MP_TASKS_PER_NODE} cpus_per_task=${MP_CPUS_PER_TASK}"
 echo "  train args: epochs=${EPOCHS} batch_size=${BATCH_SIZE} microbatches=${MICROBATCHES} train_samples=${TRAIN_SAMPLES} val_samples=${VAL_SAMPLES}"
+echo "  load_balanced: ${BALANCE_LAYERS}"
 
 srun \
   --nodes "${MP_NODES}" \
@@ -76,7 +84,8 @@ srun \
   --seed "${SEED}" \
   --hidden "${HIDDEN}" \
   --data-dir "${DATA_DIR}" \
-  --output "${OUT_CSV}"
+  --output "${OUT_CSV}" \
+  ${BALANCE_FLAG}
 
 python3 - "${OUT_CSV}" "${TRAIN_SAMPLES}" <<'PY'
 import csv

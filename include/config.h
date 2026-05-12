@@ -29,6 +29,8 @@ struct TrainConfig {
     // Local SGD: number of local gradient steps between weight-averaging syncs.
     // 1 = sync every step (equivalent to flat DP), >1 = local SGD.
     int sync_every = 1;
+
+    bool load_balance_layers = false;
 };
 
 }  // namespace nn

@@ -1,0 +1,25 @@
+in non balanced
+in non balanced
+Rank 0(mpi-mp-pip) owns layers [0, 4)
+[mpi-mp-pip] epoch 1 timings (s, epoch total) - min / mean / max across 2 ranks:
+  fwd_comm       0.0000 /  35.5124 /  71.0248
+  fwd_compute    1.5340 /  13.9665 /  26.3990
+  fwd_send       0.0000 /   0.0000 /   0.0000
+  bwd_comm       0.0000 /   2.4526 /   4.9053
+  bwd_compute    3.5148 /  23.9136 /  44.3124
+  grad_accum     0.1680 /   1.5119 /   2.8557
+  grad_apply     0.0053 /   0.0466 /   0.0878
+  bwd_send       0.0000 /   0.6778 /   1.3556
+[mpi-mp-pip] epoch 1/2 time_ms=83866 train_loss=nan train_acc=0.1009 val_loss=nan val_acc=0.0984
+[mpi-mp-pip] epoch 2 timings (s, epoch total) - min / mean / max across 2 ranks:
+  fwd_comm       0.0000 /  35.4044 /  70.8088
+  fwd_compute    1.5294 /  13.9264 /  26.3235
+  fwd_send       0.0000 /   0.0000 /   0.0000
+  bwd_comm       0.0000 /   2.4372 /   4.8745
+  bwd_compute    3.4902 /  23.8319 /  44.1735
+  grad_accum     0.1710 /   1.5133 /   2.8555
+  grad_apply     0.0053 /   0.0466 /   0.0879
+  bwd_send       0.0000 /   0.6758 /   1.3517
+[mpi-mp-pip] epoch 2/2 time_ms=83608 train_loss=nan train_acc=0.0991 val_loss=nan val_acc=0.0984
+Rank 1(mpi-mp-pip) owns layers [4, 8)
+Training finished (mpi-mp-pip). Metrics written to /global/homes/a/allenvin/project/nn-training/results/charts_20260512_110608/c4_pip_1x2_ws2.csv

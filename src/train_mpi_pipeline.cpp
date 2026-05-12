@@ -125,25 +125,12 @@ std::vector<long long> compute_layer_costs(const std::vector<int>& layer_sizes) 
     return costs;
 }
 
-// LayerRange compute_layer_range(int num_layers, int rank, int world_size) {
-//     if (num_layers < world_size) {
-//         throw std::invalid_argument(
-//             "num_layers (" + std::to_string(num_layers) + ") < world_size (" +
-//             std::to_string(world_size) + "): cannot assign at least one layer per rank");
-//     }
-//     const int base = num_layers / world_size;
-//     const int remainder = num_layers % world_size;
-//     LayerRange r;
-//     r.start = rank * base + std::min(rank, remainder);
-//     r.end = r.start + base + (rank < remainder ? 1 : 0);
-//     return r;
-// }
-
 LayerRange compute_layer_range_balanced(
     const std::vector<int>& layer_sizes, 
     int rank, 
     int world_size) {
     
+    std::cout << "in balanced" << std::endl;
     int num_layers = static_cast<int>(layer_sizes.size()) - 1;
     if (num_layers < world_size) {
         throw std::invalid_argument(
@@ -183,6 +170,21 @@ LayerRange compute_layer_range_balanced(
     ranges[world_size - 1].end = num_layers;
 
     return ranges[rank];
+}
+
+LayerRange compute_layer_range(int num_layers, int rank, int world_size) {
+    std::cout << "in non balanced" << std::endl;
+    if (num_layers < world_size) {
+        throw std::invalid_argument(
+            "num_layers (" + std::to_string(num_layers) + ") < world_size (" +
+            std::to_string(world_size) + "): cannot assign at least one layer per rank");
+    }
+    const int base = num_layers / world_size;
+    const int remainder = num_layers % world_size;
+    LayerRange r;
+    r.start = rank * base + std::min(rank, remainder);
+    r.end = r.start + base + (rank < remainder ? 1 : 0);
+    return r;
 }
 
 struct LocalMetrics {
@@ -837,8 +839,21 @@ int run_mpi_model_parallel_pipeline(
             throw std::invalid_argument(
                 "batch_size must be divisible by microbatch_count for pipeline parallelism");
         }
+        
 
-        const LayerRange range = compute_layer_range_balanced(layer_sizes, rank, world_size);
+        LayerRange range;
+        std::string mode_name;
+        if(config.load_balance_layers)
+        {
+            mode_name = "mpi-mp-pip-balanced";
+            range = compute_layer_range_balanced(layer_sizes, rank, world_size);
+        }
+        else
+        {
+            mode_name = "mpi-mp-pip";
+            range = compute_layer_range(num_layers, rank, world_size);
+        }
+
         const bool is_last_rank = (rank == world_size - 1);
 
         std::mt19937 rng(config.seed);
@@ -848,7 +863,7 @@ int run_mpi_model_parallel_pipeline(
 
         for (int r = 0; r < world_size; ++r) {
             if (rank == r) {
-                std::cout << "Rank " << rank << " owns layers ["
+                std::cout << "Rank " << rank <<"(" << mode_name << ")" << " owns layers ["
                           << range.start << ", " << range.end << ")\n";
             }
             MPI_Barrier(comm);
@@ -883,7 +898,7 @@ int run_mpi_model_parallel_pipeline(
                 comm);
 
             if (rank == 0) {
-                out << "mpi-mp-pip," << config.seed << "," << config.learning_rate << ","
+                out << mode_name << "," << config.seed << "," << config.learning_rate << ","
                     << config.batch_size << "," << config.train_samples << ","
                     << config.val_samples << "," << hidden_str << "," << epoch << ","
                     << epoch_metrics.train_loss << "," << epoch_metrics.train_acc << ","

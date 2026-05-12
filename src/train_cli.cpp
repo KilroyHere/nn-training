@@ -100,6 +100,8 @@ CliParseResult parse_train_args(
                 }
             } else if (arg == "--sync-every" && consume_value(&value)) {
                 config->sync_every = std::stoi(value);
+            } else if (arg == "--load-balance-layers") {
+                config->load_balance_layers = true;
             } else {
                 *error_message = "Unknown or malformed argument: " + arg;
                 return CliParseResult::kError;

@@ -1,0 +1,37 @@
+in non balanced
+in non balanced
+in non balanced
+in non balanced
+in non balanced
+in non balanced
+in non balanced
+in non balanced
+Rank 0(mpi-mp-pip) owns layers [0, 1)
+[mpi-mp-pip] epoch 1 timings (s, epoch total) - min / mean / max across 8 ranks:
+  fwd_comm       0.0000 /  47.8433 /  67.7668
+  fwd_compute    0.0173 /   3.5202 /  12.1820
+  fwd_send       0.0000 /   0.0000 /   0.0001
+  bwd_comm       0.0000 /   9.4822 /  40.8849
+  bwd_compute    0.0891 /   6.0934 /  17.8587
+  grad_accum     0.0012 /   0.4027 /   1.3736
+  grad_apply     0.0000 /   0.0123 /   0.0416
+  bwd_send       0.0000 /   0.3788 /   1.4946
+[mpi-mp-pip] epoch 1/2 time_ms=71931 train_loss=nan train_acc=0.1009 val_loss=nan val_acc=0.0984
+[mpi-mp-pip] epoch 2 timings (s, epoch total) - min / mean / max across 8 ranks:
+  fwd_comm       0.0000 /  47.6015 /  67.4357
+  fwd_compute    0.0155 /   3.5050 /  12.1181
+  fwd_send       0.0000 /   0.0000 /   0.0001
+  bwd_comm       0.0000 /   9.4349 /  40.7144
+  bwd_compute    0.0856 /   6.0647 /  17.7896
+  grad_accum     0.0013 /   0.4039 /   1.3697
+  grad_apply     0.0000 /   0.0123 /   0.0417
+  bwd_send       0.0000 /   0.3777 /   1.4894
+[mpi-mp-pip] epoch 2/2 time_ms=71591 train_loss=nan train_acc=0.0991 val_loss=nan val_acc=0.0984
+Rank 7(mpi-mp-pip) owns layers [7, 8)
+Rank 4(mpi-mp-pip) owns layers [4, 5)
+Rank 2(mpi-mp-pip) owns layers [2, 3)
+Rank 6(mpi-mp-pip) owns layers [6, 7)
+Rank 5(mpi-mp-pip) owns layers [5, 6)
+Rank 3(mpi-mp-pip) owns layers [3, 4)
+Rank 1(mpi-mp-pip) owns layers [1, 2)
+Training finished (mpi-mp-pip). Metrics written to /global/homes/a/allenvin/project/nn-training/results/charts_20260512_110608/c4_pip_4x2_ws8.csv
