@@ -449,9 +449,12 @@ Scaling configs & \(1n4r, 1n16r, 1n32r, 2n64r, 4n128r\) \\
 Figure~\ref{fig:epoch-vs-cluster} shows epoch time vs cluster size with serial
 baseline and ideal scaling reference. Local-SGD achieves the best time at
 128 ranks (K=50 fastest), while flat DP remains more efficient than
-hierarchical DP for this model size and workload regime. This indicates that
-hierarchical communication overhead (extra phases per step) is not amortized
-sufficiently at the current gradient payload.
+hierarchical DP for this model size and workload regime. A likely explanation
+is that \texttt{MPI\_Allreduce} in the flat-DP path benefits from mature,
+topology-aware collective implementations in the system MPI stack, whereas the
+explicit two-level hierarchical sequence (intra-reduce, inter-allreduce,
+intra-bcast) adds extra synchronization phases that are not sufficiently
+amortized at the current gradient payload.
 
 \begin{figure}[H]
   \centering
@@ -496,7 +499,13 @@ the current artifact set and is left as future work.
 Timing breakdowns from logs show:
 \begin{itemize}[nosep]
   \item flat DP: communication cost appears primarily in \texttt{allreduce\_ms},
-        while \texttt{other\_ms} remains non-negligible at high ranks.
+        while \texttt{other\_ms} remains non-negligible at high ranks. Combined
+        with better end-to-end epoch times, this is consistent with (but does
+        not by itself prove) topology-aware optimization of
+        \texttt{MPI\_Allreduce} by the MPI runtime; the exact per-call internal
+        collective algorithm is not fully exposed in public documentation for
+        the production MPI stack used on this system
+        \citep{nersc-cray-mpich,nersc-perlmutter-network,hpe-intro-mpi}.
   \item hierarchical DP: cost is split into
         \texttt{intra\_reduce\_ms}, \texttt{inter\_allreduce\_ms}, and
         \texttt{intra\_bcast\_ms}, confirming additional synchronization phases.
