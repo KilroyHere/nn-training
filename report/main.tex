@@ -64,6 +64,13 @@
 \algblockdefx[ParFor]{ParFor}{EndParFor}[1]
   {\textbf{for} #1 \textbf{do in parallel}}
   {\textbf{end for}}
+
+% ============================================================
+%  Figure path for model-parallelism charts.
+%  Adjust this one line to match your results directory.
+% ============================================================
+\newcommand{\mpfig}[1]{images/#1} 
+
 % ============================================================
 %  Title block
 % ============================================================
@@ -215,6 +222,19 @@ modes:
         activations/gradients are exchanged between neighboring partitions.
 \end{itemize}
 
+\paragraph{Data-parallel workload.}
+For serial and DP comparisons, we use the main scaling model
+\(784 \rightarrow 256 \rightarrow 128 \rightarrow 64 \rightarrow 10\), fixed
+optimizer settings, and a rank ladder from \(1n4r\) to \(4n128r\). This is the
+primary workload used for strong-scaling conclusions.
+
+\paragraph{Model-parallel workload.}
+For MP studies, we use a deeper architecture with 8 weight matrices
+\(784\!\rightarrow\!512\!\rightarrow\!512\!\rightarrow\!256\!\rightarrow\!256\!\rightarrow\!128\!\rightarrow\!64\!\rightarrow\!32\!\rightarrow\!10\)
+so layers can be distributed meaningfully across ranks. MP/pipeline experiments
+therefore analyze communication-scheduling behavior under a workload tailored to
+layer partitioning.
+
 \subsection{Sequential Baseline}
 \label{sec:baseline}
 The sequential baseline uses the same MLP, loss, and optimizer as all MPI
@@ -226,6 +246,7 @@ consistent.
 
 \subsection{Parallel Design}
 \label{sec:parallel-design}
+\subsubsection{Design Overview}
 \paragraph{Why multiple algorithms are shown.}
 The implementations do not share one execution pattern. Serial training has no
 communication. Data-parallel methods synchronize gradients or weights with
@@ -234,6 +255,7 @@ tensors point-to-point. For clarity, we therefore present separate algorithms
 for (1) serial training, (2) data-parallel training, and (3) model-parallel
 training.
 
+\subsubsection{Data-Parallel Designs}
 \paragraph{Serial.}
 Single-process SGD over shuffled mini-batches; no MPI calls.
 
@@ -267,6 +289,7 @@ Ranks execute local updates independently and synchronize model weights via one
 fused \texttt{MPI\_Allreduce} every $K$ steps (\(K \in \{10, 50\}\) in this
 report). This trades statistical freshness for lower communication frequency.
 
+\subsubsection{Model-Parallel and Pipeline Designs}
 \paragraph{Model Parallel (MP).}
 Layers are partitioned across ranks. Forward activations and backward gradients
 are exchanged via point-to-point MPI between adjacent layer partitions. In
@@ -369,12 +392,6 @@ For \(L\) pipeline stages and \(M\) microbatches, fill-drain bubble fraction is:
 \begin{equation}
 \text{bubble}(L,M) = \frac{L-1}{M+L-1}.
 \end{equation}
-Planned additions:
-\begin{itemize}[nosep]
-  \item GPipe (fill-drain) throughput model and measured bubble.
-  \item 1F1B steady-state model with overlap assumptions.
-  \item Interleaved stage model with memory/throughput trade-offs.
-\end{itemize}
 
 \subsection{Implementation Details}
 \label{sec:impl}
@@ -399,6 +416,13 @@ that affect performance and reproducibility are:
         Release builds use \texttt{-O3}, with optional \texttt{-march=native}
         and optional IPO/LTO when supported.
 \end{itemize}
+\paragraph{Serial baseline optimization context.}
+The serial path is a tuned baseline rather than an untuned reference: it uses
+the same BLAS-backed kernels, reuse-oriented buffer strategy, and release build
+configuration as the parallel code paths where applicable. This ensures that
+reported parallel speedups are measured against a reasonably optimized single-rank
+ implementation, not against avoidable serial overheads.
+
 Because model parallelism uses a separate \texttt{MPLayerSlice} forward/backward
 path, some MLP-internal workspace optimizations apply directly to serial and
 data-parallel modes, while MP performance is driven more by partitioning balance
@@ -406,12 +430,11 @@ and point-to-point communication behavior.
 
 \subsection{Experimental Setup}
 \label{sec:setup}
-All strong-scaling sweeps were executed through Slurm \texttt{srun} launchers.
-Thread-level oversubscription was disabled by pinning:
-\texttt{OMP\_NUM\_THREADS=1},
-\texttt{OPENBLAS\_NUM\_THREADS=1},
-\texttt{MKL\_NUM\_THREADS=1}.
-The primary sweep used:
+\subsubsection{Data-Parallel Setup}
+All DP strong-scaling sweeps were executed through Slurm \texttt{srun}
+launchers. Thread-level oversubscription was disabled by pinning:
+\texttt{OMP\_NUM\_THREADS=1}, \texttt{OPENBLAS\_NUM\_THREADS=1},
+\texttt{MKL\_NUM\_THREADS=1}. The primary DP sweep used:
 \begin{itemize}[nosep]
   \item epochs \(=10\), global batch \(=1024\)
   \item train/validation samples \(=50{,}000 / 10{,}000\)
@@ -426,7 +449,7 @@ Timing and summary outputs are generated from
 
 \begin{table}[H]
 \centering
-\caption{Software/runtime configuration used for scaling runs.}
+\caption{Software/runtime configuration used for DP scaling runs.}
 \label{tab:setup}
 \begin{tabular}{ll}
 \toprule
@@ -442,10 +465,29 @@ Scaling configs & \(1n4r, 1n16r, 1n32r, 2n64r, 4n128r\) \\
 \end{tabular}
 \end{table}
 
+\subsubsection{Model-Parallel / Pipeline Setup}
+MP and pipeline experiments use a deeper model to expose partitioning and
+communication effects:
+\[
+784\!\rightarrow\!512\!\rightarrow\!512\!\rightarrow\!256\!\rightarrow\!256\!\rightarrow\!128\!\rightarrow\!64\!\rightarrow\!32\!\rightarrow\!10.
+\]
+Unless otherwise noted, runs use 10 epochs, seed \(=42\), and the same
+thread-pinning policy as DP. The MP-specific sweeps are:
+\begin{itemize}[nosep]
+  \item \textbf{Batch-size sweep:} batch \(=256 \ldots 4096\), fixed world size \(=8\)
+        with \(2\times4\) layout (Sections~\ref{sec:mp-batch}).
+  \item \textbf{Microbatch sweep:} fixed batch \(=4096\), world size \(=8\),
+        varying microbatch count \(M\) (Section~\ref{sec:mp-mb}).
+  \item \textbf{World-size sweep:} batch \(=4096\), \(M=32\), world size
+        \(\mathrm{ws}\in\{2,4,6,8\}\) with 2 tasks per node
+        (Section~\ref{sec:mp-ws}).
+\end{itemize}
+
 \subsection{Results}
 \label{sec:results}
 
-\subsubsection{Scaling Analysis}
+\subsubsection{Data-Parallel Results}
+\paragraph{Scaling analysis.}
 Figure~\ref{fig:epoch-vs-cluster} shows epoch time vs cluster size with serial
 baseline and ideal scaling reference. Local-SGD achieves the best time at
 128 ranks (K=50 fastest), while flat DP remains more efficient than
@@ -458,13 +500,13 @@ amortized at the current gradient payload.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.88\linewidth]{../results/scaling/07_time_vs_cluster_with_serial.png}
+  \includegraphics[width=0.88\linewidth]{images/07_time_vs_cluster_with_serial.png}
   \caption{Epoch time vs cluster size with serial baseline and ideal line
   (MLP \(256\rightarrow128\rightarrow64\), MNIST, 10 epochs).}
   \label{fig:epoch-vs-cluster}
 \end{figure}
 
-\subsubsection{Strong Scaling}
+\paragraph{Strong scaling.}
 Using flat DP at \(1n4r\) as baseline (\(\approx 5003\) ms/epoch), strong-scaling
 speedup and efficiency are:
 
@@ -490,12 +532,12 @@ current runs, while Local-SGD surpasses flat DP speedup as \(K\) increases,
 reaching \(21.46\times\) speedup at \(4n128r\) (K=50) relative to the flat-DP
 4-rank baseline.
 
-\subsubsection{Weak Scaling}
+\paragraph{Weak scaling.}
 This report focuses on strong scaling. A dedicated weak-scaling sweep
 (proportionally increasing data size with rank count) is not yet included in
 the current artifact set and is left as future work.
 
-\subsubsection{Additional Results}
+\paragraph{Additional DP observations.}
 Timing breakdowns from logs show:
 \begin{itemize}[nosep]
   \item flat DP: communication cost appears primarily in \texttt{allreduce\_ms},
@@ -515,6 +557,251 @@ Timing breakdowns from logs show:
 Accuracy trade-off is modest for the fastest local-SGD settings in these runs:
 at 128 ranks, K=50 is fastest with a small validation-accuracy drop relative to
 flat DP.
+
+% ============================================================
+%  NEW: Model Parallelism Results
+%  Figures use \mpfig{filename} — adjust the \mpfig command
+%  at the top of this file to point to your results directory.
+% ============================================================
+
+\subsubsection{Model-Parallel Results}
+\paragraph{Epoch time and throughput vs.\ batch size.}
+\label{sec:mp-batch}
+
+Figure~\ref{fig:mp-batch-combined} shows epoch time and throughput as batch
+size varies from 256 to 4096 at a fixed world size of 8 (layout
+$2\!\times\!4$) for serial, sequential model parallel (\texttt{mpi-mp}), and
+load-balanced pipeline parallel (\texttt{mpi-mp-pip}).
+The model used for these experiments is
+$784\!\rightarrow\!512\!\rightarrow\!512\!\rightarrow\!256\!\rightarrow\!256\!\rightarrow\!128\!\rightarrow\!64\!\rightarrow\!32\!\rightarrow\!10$,
+chosen to have enough layers (8 weight matrices) to distribute meaningfully
+across 8 ranks.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{\mpfig{chart1_epoch_time.png}}
+    \caption{Epoch time vs.\ batch size.}
+    \label{fig:mp-epoch-batch}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{\mpfig{chart1_throughput.png}}
+    \caption{Throughput vs.\ batch size.}
+    \label{fig:mp-throughput-batch}
+  \end{subfigure}
+  \caption{Model parallelism performance vs.\ batch size
+           (MLP $512{\to}512{\to}256{\to}256{\to}128{\to}64{\to}32$,
+           MNIST, 10 epochs, ws\,=\,8, layout $2\!\times\!4$).}
+  \label{fig:mp-batch-combined}
+\end{figure}
+
+Several patterns are evident.
+\begin{itemize}[nosep]
+  \item \textbf{Both parallel modes are uniformly slower than serial.}
+        Sequential model parallel runs at approximately $72$--$79$\,s/epoch
+        across all batch sizes, roughly $2\times$ the serial baseline of
+        $37$--$39$\,s. This is expected: in non-pipelined model parallelism the
+        total step time equals the \emph{sum} of all ranks' compute plus
+        inter-rank communication, so adding more ranks moves work between
+        processes but does not reduce wall time for this model size.
+
+  \item \textbf{Pipeline parallel is strongly batch-size sensitive.}
+        At batch\,=\,256 pipeline epoch time is approximately $140$\,s
+        (nearly $4\times$ serial) because the microbatch size is only 8 samples
+        per slot, making per-message latency the dominant cost. As batch size
+        grows the microbatch size grows proportionally and pipeline time falls
+        sharply, reaching $\approx\!74$\,s at batch\,=\,2048 before rising
+        slightly to $81$\,s at batch\,=\,4096. The modest increase at 4096 is
+        consistent with the microbatch count rising from 32 to 64 at that point
+        (see Section~\ref{sec:mp-mb}), which increases cumulative message
+        latency.
+
+  \item \textbf{Throughput gap is consistent.}
+        Serial achieves $1{,}285$--$1{,}355$ samples/s.
+        Sequential MP achieves $635$--$690$ samples/s ($\approx\!50\%$ of
+        serial). Pipeline throughput rises from $355$ samples/s at
+        batch\,=\,256 to $660$ samples/s at batch\,=\,2048, converging toward
+        MP at larger batches.
+\end{itemize}
+
+\paragraph{Microbatch count sensitivity.}
+\label{sec:mp-mb}
+
+Figure~\ref{fig:mp-mb-combined} shows epoch time vs.\ microbatch count $M$ at
+a fixed batch size of 4096 and ws\,=\,8, together with the per-category timing
+breakdown for the pipeline runs.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{\mpfig{chart2_epoch_time.png}}
+    \caption{Epoch time vs.\ microbatch count $M$.}
+    \label{fig:mp-epoch-mb}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{\mpfig{chart2_timing_split.png}}
+    \caption{Per-category timing breakdown (pipeline, mean across ranks).}
+    \label{fig:mp-timing-split}
+  \end{subfigure}
+  \caption{Microbatch count sensitivity for pipeline parallelism
+           (batch\,=\,4096, ws\,=\,8).}
+  \label{fig:mp-mb-combined}
+\end{figure}
+
+The result is counterintuitive: \emph{fewer microbatches is faster}.
+\begin{itemize}[nosep]
+  \item At $M\!=\!8$ (microbatch size 512 rows) pipeline epoch time is
+        $\approx\!39$\,s, nearly matching serial ($\approx\!37$\,s) and
+        substantially outperforming sequential MP ($\approx\!72$\,s).
+  \item At $M\!=\!32$ (microbatch size 128) epoch time rises to $\approx\!71$\,s,
+        on par with sequential MP.
+  \item At $M\!=\!64$ (microbatch size 64) epoch time is $\approx\!81$\,s,
+        the slowest of the three despite having the highest theoretical pipeline
+        efficiency $M/(M\!+\!P\!-\!1) = 89\%$.
+\end{itemize}
+
+The timing breakdown (Figure~\ref{fig:mp-timing-split}) explains this directly.
+Forward communication wait (\texttt{fwd\_comm}) grows from $\approx\!18$\,s at
+$M\!=\!8$ to $\approx\!47$\,s at $M\!=\!32$ and $\approx\!55$\,s at
+$M\!=\!64$, growing roughly linearly with $M$. Each microbatch requires a
+separate MPI point-to-point send across the activation boundary, so cumulative
+latency accumulates as $M \cdot (\alpha + \beta m_a)$. For MNIST activations
+the tensor is small (e.g.\ $512\!\times\!512$ floats at $M\!=\!8$, smaller
+still at higher $M$), meaning startup cost $\alpha$ dominates over bandwidth
+cost $\beta m_a$. Increasing $M$ therefore multiplies latency proportionally
+without a corresponding increase in useful compute per message, overwhelming the
+theoretical bubble-fraction benefit that motivates larger $M$ values.
+
+\paragraph{Scaling with world size.}
+\label{sec:mp-ws}
+
+Figure~\ref{fig:mp-epoch-ws} shows epoch time vs.\ world size at
+batch\,=\,4096 and $M\!=\!32$, with 2 tasks per node across configurations
+$\mathrm{ws}\in\{2,4,6,8\}$.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{\mpfig{chart4_epoch_time.png}}
+  \caption{Epoch time vs.\ world size for all model-parallel modes
+           (batch\,=\,4096, $M\!=\!32$, 2 tasks/node).
+           Serial shown as dashed reference at $\approx\!37$\,s.}
+  \label{fig:mp-epoch-ws}
+\end{figure}
+
+\begin{itemize}[nosep]
+  \item \textbf{Sequential model parallel does not improve with world size.}
+        Epoch time is essentially flat at $\approx\!72$--$73$\,s across all
+        tested world sizes. This is the expected behavior: the non-pipelined
+        schedule serializes all ranks, so adding more ranks subdivides the
+        compute but adds proportional communication hops, leaving total wall
+        time unchanged.
+
+  \item \textbf{Pipeline parallel shows modest improvement with world size.}
+        Unbalanced pipeline drops from $\approx\!84$\,s at ws\,=\,2 to
+        $\approx\!79.5$\,s at ws\,=\,8. Load-balanced pipeline improves more
+        consistently, from $\approx\!82$\,s at ws\,=\,2 to $\approx\!71.5$\,s
+        at ws\,=\,8, converging toward the sequential MP baseline at the largest
+        world size tested.
+
+  \item \textbf{Serial remains faster than all parallel variants at every world size.}
+        At $\approx\!37$\,s/epoch the serial baseline sits well below all
+        model-parallel configurations. Throughput (Figure~\ref{fig:mp-throughput-ws})
+        confirms this: serial achieves $\approx\!1{,}345$ samples/s vs.\
+        $\approx\!700$ samples/s for the best parallel variant at ws\,=\,8.
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{\mpfig{chart4_throughput.png}}
+  \caption{Throughput vs.\ world size (batch\,=\,4096, $M\!=\!32$,
+           2 tasks/node).}
+  \label{fig:mp-throughput-ws}
+\end{figure}
+
+\paragraph{Load-balanced layer assignment.}
+\label{sec:mp-balance}
+
+The architecture
+$784\!\rightarrow\!512\!\rightarrow\!512\!\rightarrow\!256\!\rightarrow\!256\!\rightarrow\!128\!\rightarrow\!64\!\rightarrow\!32\!\rightarrow\!10$
+has highly skewed layer costs: the first weight matrix
+($784\!\times\!512$, $\approx\!401{,}000$ parameters) accounts for roughly
+45\% of total computation, while the last three layers together account for
+under 1\%. Naive round-robin assignment concentrates this imbalance on rank 0
+while later ranks sit idle at each pipeline stage boundary. The load-balanced
+partitioner distributes layers greedily to equalize total parameter count per
+rank.
+
+Figure~\ref{fig:mp-balance} quantifies the improvement as
+$(t_{\text{pip}} - t_{\text{bal}}) / t_{\text{pip}} \times 100$, and
+Table~\ref{tab:mp-balance} summarizes the values.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{\mpfig{chart4_balanced_improvement.png}}
+  \caption{Load-balanced pipeline improvement over naive round-robin assignment
+           (batch\,=\,4096, $M\!=\!32$, 2 tasks/node).
+           Positive values indicate the balanced partitioner is faster.
+           Zero at ws\,=\,8 is expected: with 8 layers and 8 ranks every rank
+           owns exactly one layer under both strategies.}
+  \label{fig:mp-balance}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Load-balanced pipeline improvement over naive layer assignment
+         by world size (batch\,=\,4096, $M\!=\!32$, 2 tasks/node).}
+\label{tab:mp-balance}
+\begin{tabular}{rrrr}
+\toprule
+\textbf{ws} & \textbf{Unbalanced (s)} & \textbf{Balanced (s)} & \textbf{Improvement} \\
+\midrule
+2 & $\approx 84.0$ & $\approx 82.2$ & $+2.1\%$ \\
+4 & $\approx 80.8$ & $\approx 77.5$ & $+4.1\%$ \\
+6 & $\approx 79.4$ & $\approx 74.5$ & $+6.1\%$ \\
+8 & $\approx 71.5$ & $\approx 71.5$ & $+0.0\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Improvements increase monotonically with world size up to ws\,=\,6, peaking at
+$+6.1\%$. The peak at ws\,=\,6 reflects the worst-case imbalance for the naive
+partitioner: 8 layers across 6 ranks forces 2 ranks to hold 2 layers each, and
+naive assignment places both heavy layers on the earliest ranks. The balanced
+partitioner selects which layers are grouped based on cost rather than rank
+index. At ws\,=\,8 each rank holds exactly one layer under both strategies, so
+the result is identical at $+0.0\%$.
+
+\paragraph{Summary: model parallelism vs.\ serial.}
+\label{sec:mp-summary}
+
+Across all configurations tested, model parallelism does not surpass the serial
+baseline for this workload. Speedup relative to serial remains at approximately
+$0.5\times$ for all world sizes and both pipeline strategies
+(Figure~\ref{fig:mp-speedup}), confirming that communication overhead and the
+sequential nature of layer-wise activation exchange dominate over any compute
+savings from distributing the model.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{\mpfig{chart4_speedup.png}}
+  \caption{Speedup vs.\ serial baseline for model-parallel modes
+           (batch\,=\,4096, $M\!=\!32$, 2 tasks/node).
+           All modes remain at $\approx\!0.5\times$, indicating that model
+           parallelism at this scale imposes a net overhead relative to serial.}
+  \label{fig:mp-speedup}
+\end{figure}
+
+The positive result is that the load-balanced partitioner consistently
+outperforms naive round-robin when world size does not evenly divide the layer
+count, and the pipeline schedule with a small microbatch count ($M\!=\!8$)
+can match serial epoch time at batch\,=\,4096. The negative result is that
+neither strategy overcomes the fundamental overhead of point-to-point
+activation exchange at this model and hardware scale. These findings are
+consistent with prior work suggesting that model parallelism is most beneficial
+when individual layers are too large to fit on a single device~\citep{ref3},
+a condition not met by this MNIST MLP.
 
 % ============================================================
 \section{Challenges and Obstacles}
