@@ -395,65 +395,33 @@ def plot_timing_breakdown(out_dir):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Fig 5 – Trade-off: epoch time vs val accuracy (bubble chart)
+# Fig 5 – Trade-off: epoch time vs val accuracy (pareto scatter)
 # ══════════════════════════════════════════════════════════════════════════
 def plot_tradeoff(out_dir):
-    # label, epoch_ms, val_acc, speedup_vs_flat
+    # label, epoch_ms, val_acc, speedup_vs_flat, color, marker
     rows = [
-        ("Serial\n(1 process,\nno parallelism)", 9696, 0.9226, 1/16.28, "#374151"),
-        ("Flat DP\n(128 ranks,\nsync every step)",  595, 0.9225, 1.0,    "#2563EB"),
-        ("Local SGD K=10\n(128 ranks,\nsync every 10 steps)", 264, 0.9191, 595/264, "#16A34A"),
-        ("Local SGD K=50\n(128 ranks,\nsync every 50 steps)", 233, 0.9173, 595/233, "#D97706"),
+        ("Serial", 9696, 0.9226, 1/16.28, "#374151", "o"),
+        ("Flat DP", 595, 0.9225, 1.0, "#2563EB", "o"),
+        ("Local SGD K=10", 264, 0.9191, 595/264, "#16A34A", "o"),
+        ("Local SGD K=50", 233, 0.9173, 595/233, "#D97706", "o"),
     ]
-    labels   = [r[0] for r in rows]
-    epoch_ms = np.array([r[1] for r in rows], dtype=float)
-    val_acc  = np.array([r[2] for r in rows])
-    colors   = [r[4] for r in rows]
-    # bubble size encodes epoch_ms (inverted: faster = bigger bubble)
-    max_ms = max(epoch_ms)
-    sizes  = [(1 - ms/max_ms) * 1200 + 120 for ms in epoch_ms]
+    rows_sorted = sorted(rows, key=lambda r: r[1])
+    epoch_ms = np.array([r[1] for r in rows_sorted], dtype=float)
+    val_acc = np.array([r[2] for r in rows_sorted], dtype=float)
 
     fig, ax = plt.subplots(figsize=(9, 6))
 
-    ax.scatter(epoch_ms, val_acc, s=sizes, c=colors, zorder=5,
-               edgecolors="white", linewidths=2, alpha=0.88)
-
-    # Label each point
-    label_offsets = {
-        "Serial\n(1 process,\nno parallelism)":         (-1400, -0.0008),
-        "Flat DP\n(128 ranks,\nsync every step)":        ( 100, -0.0010),
-        "Local SGD K=10\n(128 ranks,\nsync every 10 steps)": ( 80,  0.0005),
-        "Local SGD K=50\n(128 ranks,\nsync every 50 steps)": ( 80, -0.0013),
-    }
-    for lbl, ms, acc, _, color in rows:
-        dx, dy = label_offsets[lbl]
-        ax.annotate(
-            lbl,
-            xy=(ms, acc), xytext=(ms + dx, acc + dy),
-            fontsize=9, color=color, fontweight="semibold",
-            multialignment="center",
-            arrowprops=dict(arrowstyle="-", color="#CBD5E1", lw=0.9),
-        )
-
-    # Epoch-time annotations inside bubbles
-    for ms, acc in zip(epoch_ms, val_acc):
-        ax.text(ms, acc, f"{int(ms):,} ms", ha="center", va="center",
-                fontsize=8, color="white", fontweight="bold")
-
-    # accuracy loss callout
-    flat_acc  = rows[1][2]
-    k50_acc   = rows[3][2]
-    ax.annotate("",
-                xy=(233, k50_acc), xytext=(233, flat_acc),
-                arrowprops=dict(arrowstyle="<->", color="#9CA3AF", lw=1.2))
-    ax.text(190, (flat_acc + k50_acc)/2,
-            f"−{flat_acc - k50_acc:.4f}\nacc", ha="right", va="center",
-            fontsize=8.5, color="#6B7280")
+    # Light connector clarifies the trade-off progression from fast to slow.
+    ax.plot(epoch_ms, val_acc, color="#9CA3AF", linewidth=1.6, zorder=2)
+    for lbl, ms, acc, _, color, marker in rows_sorted:
+        ax.scatter([ms], [acc], s=160, c=[color], marker=marker, zorder=5,
+                   edgecolors="white", linewidths=1.6)
 
     ax.set_xscale("log")
     ax.xaxis.set_major_formatter(mticker.FuncFormatter(
         lambda v, _: f"{int(v):,} ms" if v >= 1000 else f"{int(v)} ms"))
-    ax.set_xticks([233, 264, 595, 9696])
+    ax.set_xticks([250, 600, 9696])
+    ax.set_xticklabels(["~250 ms", "~600 ms", "9,696 ms"])
     ax.set_xlabel("Time per epoch  (log scale  —  lower is faster ←)", labelpad=8)
     ax.set_ylabel("Validation accuracy on MNIST test set\n(higher is better ↑)", labelpad=8)
     ax.set_title(
@@ -462,20 +430,26 @@ def plot_tradeoff(out_dir):
     ax.set_ylim(0.9155, 0.9240)
     ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.4f"))
 
-    # "sweet spot" annotation
-    ax.annotate("Sweet spot:\n2.6× faster than Flat DP,\nonly 0.005 accuracy drop",
-                xy=(264, 0.9191), xytext=(400, 0.9205),
-                fontsize=9, color="#16A34A",
-                bbox=dict(boxstyle="round,pad=0.35", fc="#F0FDF4", ec="#16A34A", lw=0.8),
-                arrowprops=dict(arrowstyle="->", color="#16A34A", lw=1.2))
+    # Short labels near points are clearer than dense legend/callout overlays.
+    label_offsets = {
+        "Serial": (1.05, -0.00035),
+        "Flat DP": (1.03, -0.00045),
+        "Local SGD K=10": (1.06, 0.00045),
+        "Local SGD K=50": (1.08, -0.00035),
+    }
+    for lbl, ms, acc, _, color, _ in rows_sorted:
+        xmul, dy = label_offsets[lbl]
+        ax.text(ms * xmul, acc + dy, lbl, fontsize=10, color=color, fontweight="semibold")
 
-    # legend for bubble size
-    legend_elems = [
-        Line2D([0],[0], marker="o", color="w", markerfacecolor=c,
-               markersize=11, label=l.replace("\n", " "))
-        for l, _, _, _, c in rows
-    ]
-    ax.legend(handles=legend_elems, loc="lower left", frameon=True, fontsize=9)
+    flat_ms, flat_acc = 595, 0.9225
+    k10_ms, k10_acc = 264, 0.9191
+    ax.annotate(
+        f"K=10: {flat_ms/k10_ms:.2f}x faster than Flat DP\naccuracy change: {k10_acc-flat_acc:+.4f}",
+        xy=(k10_ms, k10_acc), xytext=(420, 0.9207),
+        fontsize=8.5, color="#065F46",
+        bbox=dict(boxstyle="round,pad=0.25", fc="#ECFDF5", ec="#10B981", lw=0.8),
+        arrowprops=dict(arrowstyle="->", color="#10B981", lw=1.0),
+    )
 
     fig.tight_layout()
     p = os.path.join(out_dir, "05_tradeoff.png")

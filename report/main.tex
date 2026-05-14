@@ -59,55 +59,49 @@
 \usepackage{enumitem}           % compact lists
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage{titlesec}
+\usepackage[section]{placeins}
+
+% ----- Compact paragraph/heading spacing -----
+\setlength{\parskip}{0pt}
+\titlespacing*{\subsection}{0pt}{0.7em}{0.4em}
+\titlespacing*{\subsubsection}{0pt}{0.6em}{0.3em}
+\titlespacing*{\paragraph}{0pt}{0.35em}{0.45em}
 
 
 \algblockdefx[ParFor]{ParFor}{EndParFor}[1]
   {\textbf{for} #1 \textbf{do in parallel}}
   {\textbf{end for}}
+
+% ============================================================
+%  Figure path for model-parallelism charts.
+%  Adjust this one line to match your results directory.
+% ============================================================
+\newcommand{\mpfig}[1]{images/#1} 
+
 % ============================================================
 %  Title block
 % ============================================================
 \title{
-  \textbf{MPI Parallelization of MLP Training on MNIST} \\[4pt]
+  \textbf{MPI Parallelization of MLP Training on MNIST} \\[1pt]
   \large Final Project Report
 }
 
 \author{
-  Author One\thanks{Equal contribution.} \quad
-  Author Two$^*$ \quad
-  Author Three \\[2pt]
-  \textit{[Course Name \& Number, Institution]}
+  Allen Vinoy \quad Aryan Patel \\[1pt]
 }
 
-\date{May 2026}
+\date{Spring 2026}
 
 % ============================================================
 \begin{document}
 \maketitle
+\vspace{-1.2em}
 
 % GitHub repo — required by submission guidelines
-\begin{center}
-  \textbf{GitHub Repository:}
-  \href{https://github.com/your-org/your-repo}{\texttt{github.com/your-org/your-repo}} % TODO: replace with final URL
-\end{center}
-
-\begin{abstract}
-  We study how far MPI-based parallelism can accelerate end-to-end neural-network
-  training while preserving training quality under controlled settings. Starting
-  from a serial C++17 MLP baseline on MNIST, we implement and compare four MPI
-  execution modes: flat data parallelism, two-level hierarchical data
-  parallelism, local-SGD with periodic synchronization, and layer-wise model
-  parallelism. To keep comparisons fair, all backends use matched model shape,
-  optimizer configuration, dataset subsets, and output metrics schema, and are
-  launched with one thread per rank for BLAS/OpenMP runtimes. We also apply
-  shared engineering optimizations such as memory reuse in hot paths and release
-  compiler settings. The main empirical outcome is that communication structure,
-  not only rank count, determines realized speedup: local-SGD gives the best raw
-  epoch-time scaling at large cluster size, flat DP remains a strong and stable
-  baseline, hierarchical DP does not outperform flat DP for the current model
-  size, and model parallelism is most sensitive to partition balance and
-  communication boundaries.
-\end{abstract}
+\noindent\makebox[\textwidth][c]{\textbf{GitHub Repository: }
+\href{https://github.com/KilroyHere/nn-training}{\texttt{github.com/KilroyHere/nn-training}}}
+\vspace{-1.2em}
 
 % ============================================================
 \section{Hypothesis}
@@ -117,22 +111,19 @@
 % What did you expect to find, and what did you actually find?
 % ---------------------------------------------------------------
 
-We investigate whether communication-aware MPI training strategies can deliver
-better time-to-epoch than a standard flat all-reduce baseline while maintaining
-comparable optimization behavior on MNIST. Our hypothesis has two parts:
-\begin{itemize}[nosep]
-  \item communication pattern matters as much as rank count, so methods that
-        reduce or amortize global synchronization should scale better at larger
-        process counts;
-  \item implementation details (memory reuse, consistent launch semantics, and
-        stable timing definitions) are necessary to expose the true algorithmic
-        differences across backends.
-\end{itemize}
-The observed results support this hypothesis. Local-SGD achieves the best
-large-scale epoch-time reduction, flat DP remains the strongest fully
-synchronous baseline, and hierarchical DP underperforms flat DP in our current
-workload regime because its extra synchronization phases are not sufficiently
-amortized by model size.
+We investigate MPI acceleration of MLP training on MNIST through two families
+of techniques: data parallelism (flat DP, hierarchical DP, and Local-SGD) and
+model parallelism (sequential layer partitioning and pipelined variants). Our
+hypothesis is that communication structure, not only rank count, determines
+scaling: methods that reduce global synchronization pressure should achieve
+better epoch-time scaling while retaining comparable optimization behavior.
+
+The results support this framing. In data parallelism, Local-SGD provides the
+best large-scale epoch-time reduction, flat DP remains the strongest fully
+synchronous baseline, and hierarchical DP does not amortize its extra phases at
+our current model size. In model parallelism, sequential partitioning remains
+communication-bound, while pipeline performance is highly sensitive to
+microbatch count and load balance.
 
 % ============================================================
 \section{Context}
@@ -145,25 +136,11 @@ amortized by model size.
 
 \paragraph{Member contributions.}
 \begin{itemize}[nosep]
-  \item \textbf{Author One (replace with final name):} serial baseline, shared
-        training utilities, and flat data-parallel baseline.
-  \item \textbf{Author Two (replace with final name):} hierarchical DP and
-        local-SGD variants, launch scripts, and scaling experiments.
-  \item \textbf{Author Three (replace with final name):} model-parallel path,
-        reporting pipeline, and methodology/results write-up.
+  \item \textbf{Aryan Patel:} serial baseline, shared
+        training utilities, and flat data-parallel baseline. hierarchical DP and local-SGD variants, launch scripts, and scaling experiments.
+  \item \textbf{Allen Vinoy:} sequential model-parallel, pipeline parallel, load-balanced pipeline parallel experiments.
 \end{itemize}
 
-\paragraph{Broader context.}
-This project is a course-focused systems study rather than a direct sub-project
-of an external research lab artifact. Its emphasis is reproducible performance
-evaluation of parallel training designs under matched conditions.
-
-\paragraph{Applicability to other courses.}
-Variants of this project are immediately reusable in high-performance
-computing, distributed systems, and machine-learning systems courses because the
-same codebase supports serial baselining, collective-communication studies,
-point-to-point pipeline studies, and scaling-law analysis with consistent
-metrics outputs.
 
 % ============================================================
 \section{Prior Work}
@@ -173,122 +150,87 @@ metrics outputs.
 % or will be compared against.
 % ---------------------------------------------------------------
 
-\paragraph{Work 1.}
-\citet{ref1} established a practical architecture for synchronous distributed
-data-parallel training that relies on collective communication and minimal
-intrusion into the training loop. Our flat-DP baseline follows this same
-principle: local gradient computation plus global aggregation each step, with
-careful control of launch and threading semantics.
-
-\paragraph{Work 2.}
-\citet{ref2} showed that periodic synchronization can significantly reduce
-communication while retaining useful convergence behavior. Our local-SGD mode
-adopts this idea by synchronizing fused model weights every \(K\) steps and
-quantifying the resulting speed/accuracy trade-off in a controlled MPI setting.
-
-\paragraph{Work 3.}
-\citet{ref3} demonstrated the importance of pipeline-aware scheduling in
-model-parallel training and highlighted bubble overhead as a first-order
-performance factor. Our current model-parallel implementation is non-pipelined
-but includes explicit pipeline placeholders and an alpha-beta communication
-model to prepare a clean extension path for GPipe/1F1B-style variants in
-Section~\ref{sec:methodology}.
+Distributed training has been studied across both data-parallel and
+model-parallel axes. \citet{ref1} established synchronous data-parallel
+training via collective communication, which directly motivates our flat-DP
+and hierarchical-DP baselines. \citet{ref2} showed that periodic weight
+synchronization (local SGD) reduces communication overhead while retaining
+convergence, motivating our \(K\)-step synchronization experiments.
+For model parallelism, \citet{ref3} demonstrated that pipeline-aware
+scheduling is essential and that bubble overhead is a first-order performance
+factor; our implementation adopts the same interleaved forward-backward
+schedule and uses the alpha-beta model to characterize when bubble reduction
+is overwhelmed by accumulated MPI startup latency.
 
 % ============================================================
 \section{Empirical Methodology}
 \label{sec:methodology}
 \subsection{Problem Setup}
-We study parallel training of a feed-forward MLP on MNIST with a fixed
-optimization setup and matched data split across implementations. The
-primary model for scaling is
-$784 \rightarrow 256 \rightarrow 128 \rightarrow 64 \rightarrow 10$,
-trained with SGD and cross-entropy. The project compares five execution
-modes:
+We evaluate two distinct parallelization families on MNIST.
+
+\noindent\textbf{Data-parallel family (Serial, Flat DP, Hierarchical DP, Local SGD).}
+These experiments use the main scaling model
+\(784 \rightarrow 256 \rightarrow 128 \rightarrow 64 \rightarrow 10\), trained
+with SGD and cross-entropy under fixed optimizer settings and matched data
+splits. The execution modes are:
 \begin{itemize}[nosep]
   \item \textbf{Serial}: single-process baseline.
-  \item \textbf{Flat MPI Data Parallel (DP)}: each rank computes local gradients, then performs
-        gradient all-reduce every step.
-  \item \textbf{Hierarchical MPI DP}: per-step gradient synchronization split into
-        intra-node reduce, inter-node all-reduce (leaders), and intra-node broadcast.
-  \item \textbf{Local SGD}: each rank performs local SGD and averages weights every $K$ steps.
-  \item \textbf{Model Parallel (MP)}: layers are partitioned across ranks and
-        activations/gradients are exchanged between neighboring partitions.
+  \item \textbf{Flat MPI Data Parallel (DP)}: each rank computes local gradients
+        and performs gradient all-reduce every step.
+  \item \textbf{Hierarchical MPI DP}: per-step gradient synchronization is split
+        into intra-node reduce, inter-node all-reduce (leaders), and intra-node
+        broadcast.
+  \item \textbf{Local SGD}: each rank performs local updates and averages model
+        weights every \(K\) steps.
 \end{itemize}
+This family is used for the strong-scaling conclusions from \(1n4r\) to
+\(4n128r\).
+
+\noindent\textbf{Model-parallel family (MP and pipeline variants).}
+These experiments use a deeper architecture with 8 weight matrices,
+\(784\!\rightarrow\!512\!\rightarrow\!512\!\rightarrow\!256\!\rightarrow\!256\!\rightarrow\!128\!\rightarrow\!64\!\rightarrow\!32\!\rightarrow\!10\),
+so layer partitioning across ranks is meaningful. Here we analyze sequential
+model parallelism and pipeline behavior under batch-size, microbatch-count, and
+world-size sweeps.
 
 \subsection{Sequential Baseline}
 \label{sec:baseline}
 The sequential baseline uses the same MLP, loss, and optimizer as all MPI
 variants. It runs a shuffled mini-batch loop over training data and reports
 \texttt{epoch\_time\_ms} as \emph{training-loop-only} wall time (validation
-evaluation is measured but excluded from epoch timing). This timing definition
-is intentionally mirrored in the MPI backends to keep scaling comparisons
-consistent.
+evaluation is measured but excluded from epoch timing). Validation is excluded from epoch timing in all backends, so comparisons
+reflect training cost only.
 
 \subsection{Parallel Design}
 \label{sec:parallel-design}
-\paragraph{Why multiple algorithms are shown.}
-The implementations do not share one execution pattern. Serial training has no
-communication. Data-parallel methods synchronize gradients or weights with
-collectives. Model parallelism partitions layers and exchanges intermediate
-tensors point-to-point. For clarity, we therefore present separate algorithms
-for (1) serial training, (2) data-parallel training, and (3) model-parallel
-training.
+\subsubsection{Design Overview}
+Serial training has no communication. Data-parallel methods synchronize gradients or weights with collectives. Model parallelism partitions layers and exchanges intermediate tensors point-to-point. For clarity, we therefore present separate algorithms for (1) serial training, (2) data-parallel training, and (3) model-parallel training.
 
-\paragraph{Serial.}
-Single-process SGD over shuffled mini-batches; no MPI calls.
-
+\subsubsection{Serial Design}
 \begin{algorithm}[H]
 \caption{Serial training epoch}
 \label{alg:serial}
 \begin{algorithmic}[1]
   \Require shuffled indices $I$, batch size $B$, parameters $\theta$
   \Ensure updated $\theta$ after one epoch
-  \For{$t = 0, B, 2B, \dots$}
+  \For{$t = 0, B, 2B, \dots, |I|-B$}
     \State gather batch $(x, y)$ from $I$
     \State $g \leftarrow \nabla \ell(\theta; x, y)$
     \State $\theta \leftarrow \theta - \eta g$
   \EndFor
 \end{algorithmic}
 \end{algorithm}
+\noindent\textbf{Serial.}
+Single-process SGD over shuffled mini-batches; no MPI calls.
 
-\paragraph{Flat DP.}
-Each rank processes a disjoint shard of each global batch, computes local
-gradients, then uses \texttt{MPI\_Allreduce} on layer gradients to form the
-global mean gradient before applying the update.
-
-\paragraph{Hierarchical DP.}
-Gradient synchronization is decomposed into three phases:
-\texttt{MPI\_Reduce} within a node, \texttt{MPI\_Allreduce} across node
-leaders, then \texttt{MPI\_Bcast} within each node. This reduces inter-node
-participants but introduces extra synchronization phases.
-
-\paragraph{Local SGD.}
-Ranks execute local updates independently and synchronize model weights via one
-fused \texttt{MPI\_Allreduce} every $K$ steps (\(K \in \{10, 50\}\) in this
-report). This trades statistical freshness for lower communication frequency.
-
-\paragraph{Model Parallel (MP).}
-Layers are partitioned across ranks. Forward activations and backward gradients
-are exchanged via point-to-point MPI between adjacent layer partitions. In
-this report, MP is treated as a first-class method in the main project (not an
-auxiliary baseline). We currently evaluate a non-pipelined schedule, and we
-reserve explicit placeholders for pipelined MP variants:
-\begin{itemize}[nosep]
-  \item \textbf{Pipeline placeholder A (inference-style fill/drain):}
-        TODO add timeline and throughput model for micro-batch pipeline.
-  \item \textbf{Pipeline placeholder B (1F1B schedule):}
-        TODO add 1F1B warmup/steady/cooldown schedule and bubble analysis.
-  \item \textbf{Pipeline placeholder C (interleaved virtual stages):}
-        TODO add interleaved stage assignment and expected memory trade-offs.
-\end{itemize}
-
+\subsubsection{Data-Parallel Designs}
 \begin{algorithm}[H]
 \caption{Data-parallel epoch (flat DP / hierarchical DP / local SGD)}
 \label{alg:dp}
 \begin{algorithmic}[1]
   \Require shuffled index list $I$, global batch size $B$, rank count $P$
   \Ensure updated model parameters after one epoch
-  \For{global batch offset $t = 0, B, 2B, \dots$}
+  \For{global batch offset $t = 0, B, 2B, \dots, |I|-B$}
     \State gather local mini-batch $(x_r, y_r)$ from $I$
     \State compute local gradients $g_r \leftarrow \nabla \ell(\theta; x_r, y_r)$
     \If{mode is Flat DP}
@@ -302,25 +244,50 @@ reserve explicit placeholders for pipelined MP variants:
   \EndFor
 \end{algorithmic}
 \end{algorithm}
+\noindent\textbf{Flat DP.}
+Each rank processes a disjoint shard of each global data batch, computes local
+gradients, then uses \texttt{MPI\_Allreduce} on layer gradients to form the
+global mean gradient before applying the update. \\
+\noindent\textbf{Hierarchical DP.}
+Gradient synchronization is decomposed into three phases:
+\texttt{MPI\_Reduce} within a node, \texttt{MPI\_Allreduce} across node
+leaders, then \texttt{MPI\_Bcast} within each node. This reduces inter-node
+participants but introduces extra synchronization phases. \\
+\noindent\textbf{Local SGD.}
+Ranks execute local updates independently and synchronize model weights via one
+fused \texttt{MPI\_Allreduce} every $K$ steps (\(K \in \{10, 50\}\) in this
+report). This trades statistical accuracy for lower communication frequency. \\
 
+\subsubsection{Model-Parallel and Pipeline Designs}
 \begin{algorithm}[H]
-\caption{Model-parallel epoch (non-pipelined, per-batch)}
-\label{alg:mp}
+\caption{Model-Parallel batch step (Sequential / Pipeline / Load-Balanced)}
+\label{alg:mp_unified}
 \begin{algorithmic}[1]
-  \Require layer partition per rank, batch size $B$
-  \Ensure updated local layer parameters on each rank
-  \For{each batch $(x, y)$}
-    \State receive activation from previous rank (or use input if first rank)
-    \State compute local forward over owned layers
-    \State send activation to next rank (unless last rank)
-    \State receive backward gradient from next rank (or compute from loss if last rank)
-    \State compute local backward over owned layers
-    \State send gradient to previous rank (unless first rank)
-    \State update local parameters
-  \EndFor
+  \Require ranks $P$, rank $r$, batch $(x,y)$, microbatches $M$ (if pipelined)
+  \State \textbf{if} mode is Load-Balanced \textbf{then} assign $\theta_r$ by layer cost \textbf{else} assign naively
+  \If{mode is Model Parallel}
+    \State receive $a_{\text{in}}$ (or $x$), compute forward $a_{\text{out}}$, send to $r+1$
+    \State receive $g_{\text{out}}$ (or $\nabla \ell$), compute backward $\nabla \theta_r$ and $g_{\text{in}}$, send $g_{\text{in}}$ to $r-1$
+  \ElsIf{mode $\in$ \{Pipeline, Load-Balanced\}}
+    \State split $(x,y)$ into $M$ microbatches; initialize $\nabla \theta_r^{\text{accum}} \leftarrow 0$
+    \For{step $t = 0, \dots, M + P - 2$}
+      \State \textbf{if} $t \in [0, M-1]$ \textbf{then} compute forward microbatch $t$, send $a_{\text{out}}$
+      \State \textbf{if} $t - (P - 1) \in [0, M-1]$ \textbf{then} compute backward microbatch, add to $\nabla \theta_r^{\text{accum}}$
+    \EndFor
+    \State $\nabla \theta_r \leftarrow \nabla \theta_r^{\text{accum}} / M$
+  \EndIf
+  \State apply SGD update to $\theta_r$ using $\nabla \theta_r$
 \end{algorithmic}
 \end{algorithm}
+\paragraph{Model Parallel and Pipelining.}
+Layers are partitioned across ranks. Forward activations and backward gradients are exchanged via point-to-point MPI. We evaluate three partitioning and scheduling variants:
+\begin{itemize}[nosep]
+  \item \textbf{Model Parallel:} A non-pipelined schedule where a single global batch is passed sequentially across ranks, leaving $(P-1)$ ranks idle at any given time.
+  \item \textbf{Pipeline Parallel:} The global batch is split into $M$ microbatches. Ranks execute a staggered schedule, interleaving forward and backward passes (offset by $P-1$ steps) to fill the pipeline. Gradients are accumulated and applied synchronously at the end.
+  \item \textbf{Load-Balanced Pipeline:} Instead of a naive $L/P$ layer division, layers are assigned greedily based on computational cost (using $d_{\text{in}} \times d_{\text{out}}$ parameter counts) to equalize the workload per rank and minimize pipeline bottleneck stages.
+\end{itemize}
 
+\FloatBarrier
 \subsection{Communication Cost Model (Alpha-Beta)}
 \label{sec:alpha-beta}
 We use the standard latency-bandwidth model:
@@ -330,122 +297,135 @@ T_{\text{msg}}(m) = \alpha + \beta m,
 where \(\alpha\) is startup latency, \(\beta\) is per-byte (or per-float) transfer
 cost, and \(m\) is message size.
 
-\paragraph{Flat DP (per step).}
-With all-reduce payload \(m_g\), a ring-style approximation is:
-\begin{equation}
-T_{\text{flat}}(m_g) \approx 2(P-1)\alpha + 2\frac{P-1}{P}\beta m_g.
-\end{equation}
-
-\paragraph{Hierarchical DP (per step).}
-Let \(q\) be ranks per node and \(N\) be number of nodes (\(P=Nq\)). A simple
-two-level approximation (intra reduce+bcast, inter all-reduce among leaders) is:
-\begin{equation}
-T_{\text{hier}}(m_g) \approx
-\underbrace{2\log q \, \alpha + 2\frac{q-1}{q}\beta m_g}_{\text{intra-node}}
-+
-\underbrace{2(N-1)\alpha + 2\frac{N-1}{N}\beta m_g}_{\text{inter-node}}.
-\end{equation}
-This can outperform flat DP when expensive inter-node traffic is reduced and
-message size is large enough to amortize extra phases.
-
-\paragraph{Local SGD (amortized per step).}
-If weight synchronization payload is \(m_w\) and synchronization is every
-\(K\) steps:
-\begin{equation}
-T_{\text{local,step}} \approx T_{\text{compute}} + \frac{1}{K}T_{\text{sync}}(m_w),
-\end{equation}
-which explains reduced communication overhead as \(K\) increases.
-
-\paragraph{Model Parallel (non-pipelined).}
-If activation payload per boundary is \(m_a\), backward payload is \(m_b\), and
-rank \(r\) owns local compute \(C_r\):
-\begin{equation}
-T_{\text{mp,step}} \approx \sum_{r=1}^{P}\left(C_r + (\alpha+\beta m_a) + (\alpha+\beta m_b)\right).
-\end{equation}
-The practical bottleneck is the slowest stage plus boundary communication.
-
-\paragraph{Pipeline placeholders (to be completed experimentally).}
-For \(L\) pipeline stages and \(M\) microbatches, fill-drain bubble fraction is:
-\begin{equation}
-\text{bubble}(L,M) = \frac{L-1}{M+L-1}.
-\end{equation}
-Planned additions:
+\paragraph{Variable legend.}
 \begin{itemize}[nosep]
-  \item GPipe (fill-drain) throughput model and measured bubble.
-  \item 1F1B steady-state model with overlap assumptions.
-  \item Interleaved stage model with memory/throughput trade-offs.
+  \item \(P\): total MPI ranks (world size); \(r\): rank index.
+  \item \(N\): nodes, \(q\): ranks per node, with \(P = Nq\).
+  \item \(\alpha\): per-message startup latency; \(\beta\): inverse bandwidth term.
+  \item \(m\): generic message size; \(m_g\): gradient payload; \(m_w\): weight payload.
+  \item \(m_a\): activation message size; \(m_b\): backward-gradient message size.
+  \item \(T_{\text{msg}}(\cdot)\): one-message communication time.
+  \item \(T_{\text{flat}}, T_{\text{hier}}, T_{\text{local,step}}, T_{\text{mp,step}}\): per-step costs for flat DP, hierarchical DP, Local-SGD, and model parallel.
+  \item \(T_{\text{compute}}\): local compute time per step (excluding communication).
+  \item \(T_{\text{sync}}(\cdot)\): synchronization cost term used in Local-SGD.
+  \item \(K\): Local-SGD sync interval (average one sync every \(K\) steps).
+  \item \(C_r\): compute time of stage/rank \(r\); \(C_0\): representative stage compute cost in the pipeline approximation.
+  \item \(L\): pipeline depth (number of stages/ranks); \(M\): microbatches per global batch.
+  \item \(\mathrm{bubble}(L,M)=\frac{L-1}{M+L-1}\): idealized pipeline bubble fraction.
 \end{itemize}
+
+\begin{center}
+\footnotesize
+\captionof{table}{ Alpha-Beta communication model summary by method.}
+\label{tab:alpha-beta-summary}
+\begin{tabular}{p{0.21\linewidth}p{0.74\linewidth}}
+\toprule
+\textbf{Method} & \textbf{Per-step or per-batch approximation} \\
+\midrule
+Flat DP &
+\(T_{\text{flat}}(m_g) \approx 2(P-1)\alpha + 2\frac{P-1}{P}\beta m_g\). Scales well at moderate \(P\), but latency grows with rank count. \\
+Hierarchical DP &
+\(T_{\text{hier}}(m_g) \approx \left(2\log q\,\alpha + 2\frac{q-1}{q}\beta m_g\right) + \left(2(N-1)\alpha + 2\frac{N-1}{N}\beta m_g\right)\), with \(P=Nq\). Reduces inter-node participants, but adds extra sync phases. \\
+Local SGD &
+\(T_{\text{local,step}} \approx T_{\text{compute}} + \frac{1}{K}T_{\text{sync}}(m_w)\). Larger \(K\) lowers communication cost but can weaken statistical freshness. \\
+Model Parallel &
+\(T_{\text{mp,step}} \approx \sum_{r=1}^{P}\left(C_r + (\alpha+\beta m_a) + (\alpha+\beta m_b)\right)\). Stage imbalance and boundary traffic dominate runtime. \\
+Pipeline Parallel &
+\(T_{\text{batch}} = (M + L - 1)\max\!\left(\frac{C_0}{M}, \alpha + \frac{\beta m_0}{M}\right) + (L - 1)\min\!\left(\frac{C_0}{M}, \alpha + \frac{\beta m_0}{M}\right)\), \(\text{bubble}(L,M)=\frac{L-1}{M+L-1}\). More microbatches reduce bubbles, but too many can amplify latency cost. \\
+\bottomrule
+\end{tabular}
+\end{center}
 
 \subsection{Implementation Details}
 \label{sec:impl}
-The system is implemented in C++17 with MPI collectives/point-to-point
-communication and BLAS-backed dense linear algebra. Key implementation choices
-that affect performance and reproducibility are:
-\begin{itemize}[nosep]
-  \item \textbf{BLAS acceleration:}
-        matrix multiply and vector updates were moved to BLAS-backed kernels
-        (\texttt{sgemm/saxpy/sgemv}) to reduce scalar-loop overhead.
-  \item \textbf{Backend isolation:}
-        serial, flat DP, hierarchical DP, local-SGD, and model-parallel paths
-        are built as separate executables with dedicated launch scripts.
-  \item \textbf{Memory reuse in hot loops:}
-        \begin{itemize}[nosep]
-          \item preallocated mini-batch feature/label buffers are reused across steps
-                to avoid per-batch allocation churn;
-          \item gather paths use contiguous writes to improve locality;
-          \item gradient and workspace buffers are reused in the shared MLP training path.
-        \end{itemize}
-  \item \textbf{Compiler configuration:}
-        Release builds use \texttt{-O3}, with optional \texttt{-march=native}
-        and optional IPO/LTO when supported.
-\end{itemize}
-Because model parallelism uses a separate \texttt{MPLayerSlice} forward/backward
-path, some MLP-internal workspace optimizations apply directly to serial and
-data-parallel modes, while MP performance is driven more by partitioning balance
-and point-to-point communication behavior.
+The project is implemented in C++17 with MPI and BLAS-backed dense linear
+algebra. To keep comparisons fair, serial and distributed backends share the
+same model definition, optimizer semantics, data preprocessing, and epoch-timing
+convention.
+
+\paragraph{Shared runtime and kernels.}
+All backends use BLAS-backed primitives for dense operations
+(\texttt{sgemm/saxpy/sgemv}) instead of scalar loops. This reduces per-step
+compute overhead and keeps arithmetic kernels consistent across experiments.
+
+\paragraph{Backend-specific execution paths.}
+The codebase isolates execution strategies into dedicated binaries and launch
+scripts for serial, flat DP, hierarchical DP, local-SGD, and model parallelism.
+This avoids mode-specific branching in hot loops and keeps experimental control
+explicit at launch time.
+
+\paragraph{Performance-focused optimizations.}
+Training hot loops use buffer reuse and locality-aware data movement:
+(i) preallocated mini-batch feature/label buffers, (ii) contiguous gather
+writes, and (iii) reusable gradient/workspace buffers in the shared MLP path.
+Release builds use \texttt{-O3}.
+
+\paragraph{Fair-comparison controls.}
+The serial path is intentionally tuned with the same kernel and build strategy
+as parallel runs, so reported speedups are not inflated by avoidable single-rank
+overhead. Since model parallelism uses a separate
+forward/backward path, its performance depends less on the BLAS and
+buffer optimizations above, and more on how evenly layers are distributed across ranks and how quickly activations and gradients can be passed between neighboring ranks.
 
 \subsection{Experimental Setup}
 \label{sec:setup}
-All strong-scaling sweeps were executed through Slurm \texttt{srun} launchers.
-Thread-level oversubscription was disabled by pinning:
-\texttt{OMP\_NUM\_THREADS=1},
-\texttt{OPENBLAS\_NUM\_THREADS=1},
-\texttt{MKL\_NUM\_THREADS=1}.
-The primary sweep used:
+All experiments were launched with Slurm \texttt{srun}. To avoid thread-level
+oversubscription, we pinned \texttt{OMP\_NUM\_THREADS=1},
+\texttt{OPENBLAS\_NUM\_THREADS=1}, and \texttt{MKL\_NUM\_THREADS=1}. Unless
+noted otherwise, runs use 10 epochs and seed \(=42\).
+
+\subsubsection{Data-Parallel Setup}
+\textbf{Goal:} measure strong scaling across rank count for serial/DP-family
+methods.
+
+\textbf{Fixed configuration:}
 \begin{itemize}[nosep]
-  \item epochs \(=10\), global batch \(=1024\)
-  \item train/validation samples \(=50{,}000 / 10{,}000\)
-  \item learning rate \(=0.03\), seed \(=42\)
-  \item hidden layers \(=256,128,64\)
-  \item rank ladder:
+  \item model: \(784 \rightarrow 256 \rightarrow 128 \rightarrow 64 \rightarrow 10\)
+  \item global batch: \(1024\)
+  \item train/validation samples: \(50{,}000 / 10{,}000\)
+  \item learning rate: \(0.03\)
+\end{itemize}
+
+\textbf{Sweep axis:}
+\begin{itemize}[nosep]
+  \item rank ladder (notation: \(n\)=nodes, \(r\)=MPI ranks):
         \(1n4r \rightarrow 1n16r \rightarrow 1n32r \rightarrow 2n64r \rightarrow 4n128r\)
 \end{itemize}
-Timing and summary outputs are generated from
-\texttt{results/scaling/*.csv} and \texttt{results/scaling/*.log} via
-\texttt{summarize\_dp\_scaling.py} and \texttt{make\_scaling\_visuals.py}.
 
-\begin{table}[H]
-\centering
-\caption{Software/runtime configuration used for scaling runs.}
-\label{tab:setup}
-\begin{tabular}{ll}
-\toprule
-\textbf{Component} & \textbf{Specification} \\
-\midrule
-Runtime launcher & Slurm \texttt{srun} + MPI \\
-Threading policy & OMP/BLAS/MKL threads pinned to 1 \\
-Build mode & Release (\texttt{-O3}, optional \texttt{-march=native}, optional IPO) \\
-Dataset & MNIST (local cache via \texttt{prepare\_mnist.sh}) \\
-Model for main sweep & MLP \(256,128,64\) hidden layers \\
-Scaling configs & \(1n4r, 1n16r, 1n32r, 2n64r, 4n128r\) \\
-\bottomrule
-\end{tabular}
-\end{table}
 
+\subsubsection{Model-Parallel / Pipeline Setup}
+\textbf{Goal:} characterize partitioning and communication/scheduling effects
+in MP and pipeline runs.
+
+\textbf{Fixed configuration:}
+\begin{itemize}[nosep]
+  \item model: \(784\!\rightarrow\!512\!\rightarrow\!512\!\rightarrow\!256\!\rightarrow\!256\!\rightarrow\!128\!\rightarrow\!64\!\rightarrow\!32\!\rightarrow\!10\)
+  \item pipeline default: load-balanced layer assignment (\texttt{--load-balance-layers})
+\end{itemize}
+
+\textbf{Sweep axes:}
+\begin{itemize}[nosep]
+  \item \textbf{Batch-size sweep:} batch \(=256 \ldots 4096\), fixed world
+        size \(=8\) with \(4\!\times\!2\) layout (4 nodes, 2 tasks per node),
+        microbatch count \(M=32\).
+  \item \textbf{Microbatch sweep:} fixed batch \(=4096\), world size \(=8\)
+        with \(2\!\times\!4\) layout, varying microbatch count
+        \(M \in \{8, 32, 64\}\).
+  \item \textbf{World-size sweep:} fixed batch \(=4096\), \(M=32\), world
+        size \(\mathrm{ws}\in\{2,4,6,8\}\) with 2 tasks per node
+        (1--4 nodes). Both unbalanced and load-balanced pipeline variants
+        are run to quantify the partitioning benefit.
+\end{itemize}
+\FloatBarrier
 \subsection{Results}
 \label{sec:results}
+DP and MP results are reported as two method families with different workload
+goals and model shapes (Section~\ref{sec:setup}); comparisons are therefore
+interpreted within family (DP vs DP, MP vs MP), not as direct absolute DP-vs-MP
+rankings.
 
-\subsubsection{Scaling Analysis}
+\subsubsection{Data-Parallel Results}
+\paragraph{Epoch time vs.\ cluster size.}
 Figure~\ref{fig:epoch-vs-cluster} shows epoch time vs cluster size with serial
 baseline and ideal scaling reference. Local-SGD achieves the best time at
 128 ranks (K=50 fastest), while flat DP remains more efficient than
@@ -456,16 +436,24 @@ explicit two-level hierarchical sequence (intra-reduce, inter-allreduce,
 intra-bcast) adds extra synchronization phases that are not sufficiently
 amortized at the current gradient payload.
 
-\begin{figure}[H]
+\begin{center}
+\begin{minipage}[t]{0.49\linewidth}
   \centering
-  \includegraphics[width=0.88\linewidth]{../results/scaling/07_time_vs_cluster_with_serial.png}
-  \caption{Epoch time vs cluster size with serial baseline and ideal line
+  \includegraphics[width=0.98\linewidth]{images/07_time_vs_cluster_with_serial.png}
+  \captionof{figure}{Epoch time vs cluster size with serial baseline and ideal line
   (MLP \(256\rightarrow128\rightarrow64\), MNIST, 10 epochs).}
   \label{fig:epoch-vs-cluster}
-\end{figure}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\linewidth}
+  \centering
+  \includegraphics[width=0.98\linewidth]{images/02_efficiency.png}
+  \captionof{figure}{DP parallel efficiency vs.\ cluster size across synchronization methods.}
+  \label{fig:dp-efficiency}
+\end{minipage}
+\end{center}
 
-\subsubsection{Strong Scaling}
-Using flat DP at \(1n4r\) as baseline (\(\approx 5003\) ms/epoch), strong-scaling
+\paragraph{Strong-scaling speedup and efficiency.}
+Using flat DP at \(1n4r\) as baseline (\(\approx 4143\) ms/epoch), strong-scaling
 speedup and efficiency are:
 
 \begin{table}[H]
@@ -476,26 +464,25 @@ speedup and efficiency are:
 \toprule
 \textbf{Config} & \textbf{Time (ms)} & \textbf{Speedup $S(p)$} & \textbf{Efficiency $E(p)$} \\
 \midrule
-1n4r   & 5003 & 1.00$\times$ & 100.0\% \\
-1n16r  & 1555 & 3.22$\times$ & 80.4\% \\
-1n32r  & 1001 & 5.00$\times$ & 62.5\% \\
-2n64r  &  746 & 6.71$\times$ & 41.9\% \\
-4n128r &  595 & 8.40$\times$ & 26.3\% \\
+1n4r   & 4143 & 1.00$\times$ & 100.0\% \\
+1n16r  & 1125 & 3.68$\times$ & 92.1\% \\
+1n32r  &  652 & 6.35$\times$ & 79.4\% \\
+2n64r  &  408 & 10.16$\times$ & 63.5\% \\
+4n128r &  292 & 14.21$\times$ & 44.4\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+Figure~\ref{fig:dp-efficiency} summarizes DP efficiency across methods:
+flat DP, hierarchical DP, and Local-SGD (\(K=10,50\)). Efficiency decays with
+cluster size as communication overhead becomes a larger fraction of step time.
 Compared to flat DP, hierarchical DP trails at all tested scales in the
 current runs, while Local-SGD surpasses flat DP speedup as \(K\) increases,
-reaching \(21.46\times\) speedup at \(4n128r\) (K=50) relative to the flat-DP
+reaching \(27.39\times\) speedup at \(4n128r\) (K=50) relative to the flat-DP
 4-rank baseline.
 
-\subsubsection{Weak Scaling}
-This report focuses on strong scaling. A dedicated weak-scaling sweep
-(proportionally increasing data size with rank count) is not yet included in
-the current artifact set and is left as future work.
 
-\subsubsection{Additional Results}
+\paragraph{Communication breakdown and synchronization cost.}
 Timing breakdowns from logs show:
 \begin{itemize}[nosep]
   \item flat DP: communication cost appears primarily in \texttt{allreduce\_ms},
@@ -516,6 +503,112 @@ Accuracy trade-off is modest for the fastest local-SGD settings in these runs:
 at 128 ranks, K=50 is fastest with a small validation-accuracy drop relative to
 flat DP.
 
+\paragraph{Local-SGD synchronization sensitivity (\(K\)).}
+Across the tested Local-SGD settings (\(K\in\{10,50\}\)), increasing \(K\)
+reduces synchronization overhead and improves epoch time in large-scale runs,
+with only a modest validation-accuracy change in the current workload regime.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{images/05_tradeoff.png}
+  \caption{Speed-vs-accuracy tradeoff at \(4n128r\) for serial, flat DP,
+           and Local-SGD (\(K=10,50\)).}
+  \label{fig:dp-tradeoff}
+\end{figure}
+\paragraph{DP takeaway.}
+Within the DP family, communication structure is the dominant performance
+factor at scale: Local-SGD gives the strongest epoch-time reduction in current
+runs, flat DP remains the best fully synchronous baseline, and hierarchical DP
+adds synchronization phases that are not sufficiently amortized at this model
+size.
+
+\FloatBarrier
+
+\subsubsection{Model-Parallel Results}
+
+\paragraph{Serial vs.\ model parallel vs.\ pipeline (batch size sweep).}
+Figure~\ref{fig:mp-batch} shows epoch time as batch size varies from 256
+to 4096 at ws\,=\,8.
+Sequential model parallel runs at $72$--$79$\,s/epoch regardless of batch
+size — roughly $2\times$ the serial baseline of $36$--$39$\,s — because the
+non-pipelined schedule serializes all ranks: total step time equals the
+\emph{sum} of every rank's compute plus communication.
+Pipeline parallel is strongly batch-sensitive: at batch\,=\,256 the
+microbatch size is only 8 rows, making per-message latency the dominant
+cost ($\approx\!140$\,s/epoch). As batch size grows and microbatches become
+larger, pipeline time falls sharply, approaching the model-parallel line at
+batch\,=\,2048 and crossing below it at batch\,=\,4096 when microbatch size
+is large enough to amortize startup latency.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{\mpfig{chart1_epoch_time.png}}
+  \caption{Epoch time vs.\ batch size (ws\,=\,8, layout $4\!\times\!2$,
+           $M\!=\!32$ microbatches).}
+  \label{fig:mp-batch}
+\end{figure}
+
+\paragraph{Microbatch sensitivity and pipeline idle time.}
+Figure~\ref{fig:mp-mb} fixes batch\,=\,4096 and varies microbatch count
+$M$. The result is counterintuitive: \emph{fewer microbatches are faster}.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{\mpfig{chart2_epoch_time_bar.png}}
+    \caption{Epoch time vs.\ $M$.}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{\mpfig{chart2_timing_split.png}}
+    \caption{Per-category idle time breakdown.}
+  \end{subfigure}
+  \caption{Microbatch sensitivity and pipeline idle time
+           (batch\,=\,4096, ws\,=\,8).}
+  \label{fig:mp-mb}
+\end{figure}
+
+At $M\!=\!8$ (microbatch size 512 rows) pipeline epoch time is
+$\approx\!39$\,s, nearly matching serial ($\approx\!37$\,s). At $M\!=\!32$
+it rises to $\approx\!71.6$\,s, and at $M\!=\!64$ to $\approx\!81.2$\,s,
+despite $M\!=\!64$ having the best theoretical pipeline efficiency
+($90.1\%$).
+The timing breakdown (Figure~\ref{fig:mp-mb}b) reveals why: forward
+communication wait (\texttt{fwd\_comm}) — the time each rank sits idle
+waiting for the next activation — grows from $\approx\!18$\,s at
+$M\!=\!8$ to $\approx\!55$\,s at $M\!=\!64$, scaling roughly linearly with
+$M$. Each of the $M$ microbatches incurs a separate MPI send latency
+$\alpha$ regardless of message size; for small MNIST activations $\alpha$
+dominates over bandwidth cost $\beta m$, so total idle time accumulates as
+$M\alpha$ and overwhelms the theoretical bubble reduction.
+
+\paragraph{Pipeline vs.\ load-balanced pipeline.}
+Figure~\ref{fig:mp-ws} shows epoch time across world sizes ws\,$\in\!\{2,4,6,8\}$
+at batch\,=\,4096 and $M\!=\!32$. Model Parallel is flat at $\approx\!72$\,s
+regardless of world size, as expected. Pipeline improves modestly with world
+size; the load-balanced variant reduces epoch time by $2$--$6\%$ over naive
+round-robin assignment at ws\,=\,2,\,4,\,6 (Figure~\ref{fig:mp-bal}). The improvement peaks at ws\,=\,6 ($+6.1\%$),
+where naive assignment places the two heaviest layers on the earliest ranks;
+the balanced partitioner redistributes by cost. At ws\,=\,8 both strategies
+assign exactly one layer per rank, so the result is identical ($+0.0\%$).
+Across all configurations, serial ($\approx\!37$\,s) remains faster than
+every parallel variant.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{\mpfig{chart4_epoch_time.png}}
+    \caption{Epoch time vs.\ world size.}
+    \label{fig:mp-ws}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.48\linewidth}
+    \includegraphics[width=\linewidth]{\mpfig{chart4_balanced_improvement.png}}
+    \caption{Load-balanced improvement (\%).}
+    \label{fig:mp-bal}
+  \end{subfigure}
+  \caption{World-size scaling and load-balance effect
+           (batch\,=\,4096, $M\!=\!32$, 2 tasks/node).}
+\end{figure}
 % ============================================================
 \section{Challenges and Obstacles}
 \label{sec:challenges}
@@ -524,12 +617,40 @@ flat DP.
 % Hypotheses for things that did not work as expected.
 % ---------------------------------------------------------------
 
-\paragraph{[Challenge 1].} TODO: describe what you tried, what
-happened, and your hypothesis for why.
+\paragraph{Challenge 1: Microbatch count unexpectedly dominated pipeline performance.}
+The bubble fraction $\frac{L-1}{M+L-1}$ decreases as $M$ grows, predicting
+that more microbatches should reduce pipeline idle time and improve
+throughput. Instead, $M\!=\!8$ nearly matched serial ($\approx\!39$\,s)
+while $M\!=\!64$ was the slowest ($\approx\!81$\,s) despite having the
+highest bubble fraction of $47\%$ vs $9.9\%$ respectively. The timing
+breakdown revealed that forward communication wait (\texttt{fwd\_comm})
+grows roughly as $M\alpha$: each microbatch incurs a fixed MPI startup
+cost $\alpha$ regardless of message size, and for small MNIST activations
+this latency dominates over bandwidth cost $\beta m$. The bubble model is
+therefore incomplete — it only captures compute idleness and ignores
+accumulated communication latency, which becomes the binding constraint
+at large $M$.
 
-\paragraph{[Challenge 2].} TODO.
+\paragraph{Challenge 2: Flat \texttt{MPI\_Allreduce} outperformed our hierarchical design at scale.}
+We expected hierarchical DP to win at higher rank counts by reducing
+inter-node participants, but on Perlmutter the flat DP path was consistently
+faster in end-to-end epoch time. A key obstacle was that this contradicted our
+initial communication-structure intuition and forced us to revisit system-level
+effects. Our working explanation is that the production MPI stack on
+Perlmutter provides highly optimized, topology-aware collective algorithms for
+\texttt{MPI\_Allreduce}, while our explicit two-level hierarchy
+(\texttt{Reduce} $\rightarrow$ leader \texttt{Allreduce} $\rightarrow$
+\texttt{Bcast}) introduces extra synchronization phases and software overhead
+that were not amortized at our model size.
 
-\paragraph{[Challenge 3].} TODO.
+\paragraph{Challenge 3: Keeping cross-backend comparisons fair required strict measurement discipline.}
+Serial, data-parallel, and model-parallel paths use different communication
+patterns and partially different kernels, so naive timing comparisons were easy
+to misinterpret. We had to enforce matched launch semantics, a shared epoch-time
+definition, and an optimized serial baseline (BLAS-backed kernels, reuse-oriented
+buffers, release builds) before interpreting speedups. This added engineering
+overhead but was necessary to attribute differences to algorithmic choices
+rather than mismatched implementation quality.
 
 % ============================================================
 % Bibliography
@@ -551,4 +672,4 @@ happened, and your hypothesis for why.
 %   TODO
 % \end{thebibliography}
 
-\end{document}
+\end{document} 
