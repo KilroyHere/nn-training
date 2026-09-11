@@ -15,6 +15,10 @@ C++17 MNIST training project with serial and MPI backends, focused on data-paral
   - `mpi_mp_pip_train` (pipeline model parallel, optional load-balanced partitioning)
 - Writes per-epoch metrics to CSV for all modes.
 
+## Benchmark highlight
+
+On a 4-node, 128-MPI-rank MNIST strong-scaling study, the Local-SGD backend with synchronization every 50 steps reduced average epoch time from **9,696 ms** for the serial baseline to **151 ms** (**64.12x** faster), while validation accuracy changed from **92.26%** to **91.71%**. The study compares flat data parallelism, hierarchical data parallelism, and Local SGD; full measurements and timing breakdowns are available in `results/scaling/scaling_sweeps_result.txt`.
+
 ## Build requirements
 
 - CMake >= 3.16
@@ -187,4 +191,4 @@ latexmk -pdf main.tex
 ## Notes
 
 - Threading is pinned to 1 in run scripts (`OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`) to avoid oversubscription.
-- Some filenames intentionally use `hierarchial` (spelling preserved for compatibility with existing scripts/binaries).
+- Some legacy executable and script names retain the misspelling `hierarchial` for compatibility; documentation refers to the method as **hierarchical data parallelism**.
