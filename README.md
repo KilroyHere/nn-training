@@ -17,7 +17,7 @@ C++17 MNIST training project with serial and MPI backends, focused on data-paral
 
 ## Benchmark highlight
 
-On a 4-node, 128-MPI-rank MNIST strong-scaling study, the Local-SGD backend with synchronization every 50 steps reduced average epoch time from **9,696 ms** for the serial baseline to **151 ms** (**64.12x** faster), while validation accuracy changed from **92.26%** to **91.71%**. The study compares flat data parallelism, hierarchical data parallelism, and Local SGD; full measurements and timing breakdowns are available in `results/scaling/scaling_sweeps_result.txt`.
+On NERSC Perlmutter, a 4-node, 128-MPI-rank MNIST strong-scaling study, the Local-SGD backend with synchronization every 50 steps reduced average epoch time from **9,696 ms** for the serial baseline to **151 ms** (**64.12x** faster), while validation accuracy changed from **92.26%** to **91.71%**. The study compares flat data parallelism, hierarchical data parallelism, and Local SGD; full measurements and timing breakdowns are available in `results/scaling/scaling_sweeps_result.txt`.
 
 ## Build requirements
 
